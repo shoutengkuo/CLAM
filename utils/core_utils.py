@@ -63,7 +63,7 @@ class EarlyStopping:
         self.counter = 0
         self.best_score = None
         self.early_stop = False
-        self.val_loss_min = np.Inf
+        self.val_loss_min = np.inf
 
     def __call__(self, epoch, val_loss, model, ckpt_name = 'checkpoint.pt'):
 
@@ -159,6 +159,18 @@ def train(datasets, cur, args):
         else:
             model = MIL_fc(**model_dict)
     
+    feat_norm = getattr(args, 'feat_norm', 'none')
+    if feat_norm != 'none':
+        assert args.model_type in ['clam_sb', 'clam_mb'], '--feat_norm is implemented for CLAM models only'
+        if feat_norm == 'zscore':
+            from utils.feature_stats import slide_stats, fold_mean_std
+            stats = slide_stats(args.data_root_dir, args.feature_dir)
+            mean, std, n_patches = fold_mean_std(stats, train_split.slide_data['slide_id'].tolist())
+            print('\nz-score statistics from {} training slides ({} patches)'.format(len(train_split), n_patches))
+            model.set_feature_norm('zscore', mean, std)
+        else:
+            model.set_feature_norm('l2')
+        print('Input feature normalization: {}'.format(feat_norm))
     _ = model.to(device)
     print('Done!')
     print_network(model)

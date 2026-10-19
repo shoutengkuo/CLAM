@@ -69,6 +69,11 @@ parser = argparse.ArgumentParser(description='Configurations for WSI Training')
 parser.add_argument('--data_root_dir', type=str, default=None, 
                     help='data directory')
 parser.add_argument('--embed_dim', type=int, default=1024)
+parser.add_argument('--feature_dir', type=str, default='camelyon_plus_resnet50',
+                    help='feature folder under data_root_dir (camelyon_plus_2cls only)')
+parser.add_argument('--feat_norm', type=str, choices=['none', 'l2', 'zscore'], default='none',
+                    help='input feature normalization: l2 = unit-norm patch vectors, zscore = per-dimension '
+                         '(x - mean) / std with statistics from the training slides of each fold')
 parser.add_argument('--max_epochs', type=int, default=200,
                     help='maximum number of epochs to train (default: 200)')
 parser.add_argument('--lr', type=float, default=1e-4,
@@ -98,7 +103,7 @@ parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mi
 parser.add_argument('--exp_code', type=str, help='experiment code for saving results')
 parser.add_argument('--weighted_sample', action='store_true', default=False, help='enable weighted sampling')
 parser.add_argument('--model_size', type=str, choices=['small', 'big'], default='small', help='size of model, does not affect mil')
-parser.add_argument('--task', type=str, choices=['task_1_tumor_vs_normal',  'task_2_tumor_subtyping'])
+parser.add_argument('--task', type=str, choices=['task_1_tumor_vs_normal',  'task_2_tumor_subtyping', 'camelyon_plus_2cls', 'camelyon_plus_4cls'])
 ### CLAM specific options
 parser.add_argument('--no_inst_cluster', action='store_true', default=False,
                      help='disable instance-level clustering')
@@ -175,8 +180,30 @@ elif args.task == 'task_2_tumor_subtyping':
                             ignore=[])
 
     if args.model_type in ['clam_sb', 'clam_mb']:
-        assert args.subtyping 
-        
+        assert args.subtyping
+
+elif args.task == 'camelyon_plus_2cls':
+    args.n_classes=2
+    dataset = Generic_MIL_Dataset(csv_path = 'dataset_csv/camelyon_plus_2cls.csv',
+                            data_dir= os.path.join(args.data_root_dir, args.feature_dir),
+                            shuffle = False,
+                            seed = args.seed,
+                            print_info = True,
+                            label_dict = {'negative':0, 'tumor':1},
+                            patient_strat=False,
+                            ignore=[])
+
+elif args.task == 'camelyon_plus_4cls':
+    args.n_classes=4
+    dataset = Generic_MIL_Dataset(csv_path = 'dataset_csv/camelyon_plus_4cls.csv',
+                            data_dir= os.path.join(args.data_root_dir, args.feature_dir),
+                            shuffle = False,
+                            seed = args.seed,
+                            print_info = True,
+                            label_dict = {'negative':0, 'itc':1, 'micro':2, 'macro':3},
+                            patient_strat=False,
+                            ignore=[])
+
 else:
     raise NotImplementedError
     
@@ -196,6 +223,7 @@ print('split_dir: ', args.split_dir)
 assert os.path.isdir(args.split_dir)
 
 settings.update({'split_dir': args.split_dir})
+settings.update({'embed_dim': args.embed_dim, 'feature_dir': args.feature_dir, 'feat_norm': args.feat_norm})
 
 
 with open(args.results_dir + '/experiment_{}.txt'.format(args.exp_code), 'w') as f:

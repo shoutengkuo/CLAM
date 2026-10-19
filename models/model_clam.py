@@ -63,6 +63,28 @@ class Attn_Net_Gated(nn.Module):
         A = self.attention_c(A)  # N x n_classes
         return A, x
 
+
+"""
+Optional input feature normalization, applied as the first step of the CLAM forward pass
+(so that training, validation, test and eval.py use exactly the same transform).
+  mode 'l2'    : scale every patch feature vector to unit L2 norm (no statistics needed)
+  mode 'zscore': per-dimension (x - mean) / std; mean and std are buffers (saved in the checkpoint)
+                 and are computed from the training slides of each fold only (see utils/feature_stats.py)
+"""
+class FeatureNorm(nn.Module):
+    def __init__(self, mode, dim, mean=None, std=None):
+        super().__init__()
+        assert mode in ('l2', 'zscore')
+        self.mode = mode
+        if mode == 'zscore':
+            self.register_buffer('mean', torch.zeros(dim) if mean is None else torch.as_tensor(mean, dtype=torch.float32))
+            self.register_buffer('std', torch.ones(dim) if std is None else torch.as_tensor(std, dtype=torch.float32))
+
+    def forward(self, h):
+        if self.mode == 'l2':
+            return F.normalize(h, p=2, dim=1)
+        return (h - self.mean) / self.std
+
 """
 args:
     gate: whether to use gated attention network
@@ -94,7 +116,17 @@ class CLAM_SB(nn.Module):
         self.instance_loss_fn = instance_loss_fn
         self.n_classes = n_classes
         self.subtyping = subtyping
+        self.feat_norm = None
     
+
+    def set_feature_norm(self, mode, mean=None, std=None):
+        """Enable input feature normalization ('l2' or 'zscore'); 'none' or None disables it."""
+        if mode in (None, 'none'):
+            self.feat_norm = None
+        else:
+            dim = self.attention_net[0].in_features
+            self.feat_norm = FeatureNorm(mode, dim, mean, std)
+
     @staticmethod
     def create_positive_targets(length, device):
         return torch.full((length, ), 1, device=device).long()
@@ -136,6 +168,8 @@ class CLAM_SB(nn.Module):
         return instance_loss, p_preds, p_targets
 
     def forward(self, h, label=None, instance_eval=False, return_features=False, attention_only=False):
+        if self.feat_norm is not None:
+            h = self.feat_norm(h)
         A, h = self.attention_net(h)  # NxK        
         A = torch.transpose(A, 1, 0)  # KxN
         if attention_only:
@@ -201,8 +235,11 @@ class CLAM_MB(CLAM_SB):
         self.instance_loss_fn = instance_loss_fn
         self.n_classes = n_classes
         self.subtyping = subtyping
+        self.feat_norm = None
 
     def forward(self, h, label=None, instance_eval=False, return_features=False, attention_only=False):
+        if self.feat_norm is not None:
+            h = self.feat_norm(h)
         A, h = self.attention_net(h)  # NxK        
         A = torch.transpose(A, 1, 0)  # KxN
         if attention_only:

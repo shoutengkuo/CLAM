@@ -1,0 +1,3 @@
+,train,val,test
+negative,683,100,88
+tumor,382,51,46

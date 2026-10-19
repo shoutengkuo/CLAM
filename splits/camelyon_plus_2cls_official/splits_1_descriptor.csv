@@ -1,0 +1,3 @@
+label,train,val,test
+negative,434,45,392
+tumor,246,27,206

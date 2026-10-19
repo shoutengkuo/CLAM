@@ -1,3 +1,10 @@
 **/.DS_Store
 __pycache__/
 notebooks
+# Camelyon+ experiments: large or local-only outputs
+*.pt
+events.out.tfevents.*
+logs/
+feature_stats/
+eval_results/
+.claude/settings.local.json

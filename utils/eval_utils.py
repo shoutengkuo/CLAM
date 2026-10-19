@@ -31,6 +31,10 @@ def initiate_model(args, ckpt_path, device='cuda'):
         else:
             model = MIL_fc(**model_dict)
 
+    feat_norm = getattr(args, 'feat_norm', 'none')
+    if feat_norm != 'none':
+        model.set_feature_norm(feat_norm)  # z-score mean/std are filled from the checkpoint buffers
+
     print_network(model)
 
     ckpt = torch.load(ckpt_path)
