@@ -7,12 +7,14 @@ Camelyon+ 4-class label file, and writes PNG figures:
   results/figures/*.png         comparison figures (reports 1-5)
 
 Usage (from the repo root):
-  python results/make_report_figures.py
+  python results/make_report_figures.py              # all figures
+  python results/make_report_figures.py --only ienf  # only the IENF report figures
 """
 import glob
 import os
 import pickle
 import struct
+import sys
 
 import matplotlib
 matplotlib.use('Agg')
@@ -21,6 +23,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.lines import Line2D
+from PIL import Image
 from scipy import stats
 from sklearn.metrics import confusion_matrix, precision_recall_curve, roc_auc_score, roc_curve
 from tensorboardX.proto import event_pb2
@@ -1405,8 +1408,171 @@ def fig_lr_best_epoch(lr, path):
     save(fig, path)
 
 
+# ----------------------------------------------------------------------------- IENF 2-class (Control vs. DM + FAP), 5-fold
+IENF_RUNS = {  # key: (run dir, label, colour). Hue = patch size (yellow 224, violet 128); darker = larger B
+    'ienf_224_b4': ('ienf_2cls_uni_p224_CLAM_B4_s1', '224 px, B = 4', '#f2c35b'),
+    'ienf_224_b8': ('ienf_2cls_uni_p224_CLAM_B8_s1', '224 px, B = 8', '#c98700'),
+    'ienf_128_b8': ('ienf_2cls_uni_p128_CLAM_B8_s1', '128 px, B = 8', '#9d93d9'),
+    'ienf_128_b16': ('ienf_2cls_uni_p128_CLAM_B16_s1', '128 px, B = 16', '#4a3aa7'),
+}
+IENF_K = 5
+IENF_GROUPS = [('Control', 'Control\n(specificity)'), ('DM', 'DM\n(sensitivity)'), ('FAP', 'FAP\n(sensitivity)')]
+
+
+def load_ienf():
+    global K
+    sub = pd.read_csv(os.path.join(os.path.dirname(RESULTS), 'dataset_csv', 'ienf_3cls.csv')).set_index('slide_id').label.to_dict()
+    out, k_saved = {}, K
+    K = IENF_K
+    for key, (d, name, color) in IENF_RUNS.items():
+        RUNS[key] = dict(dir=d, name=name, color=color)
+        out[key] = load_run(key, sub)
+    K = k_saved
+    return out
+
+
+def _ienf_handles(marker=None):
+    kw = dict(marker='o', lw=0, ms=8) if marker else dict(lw=8)
+    return [Line2D([], [], color=RUNS[k]['color'], label=RUNS[k]['name'], **kw) for k in IENF_RUNS]
+
+
+def fig_ienf_metrics(runs, path):
+    metrics = ['auc', 'acc', 'bacc', 'sens', 'spec', 'f1_tumor', 'map_macro']
+    fig, ax = plt.subplots(figsize=(12, 4.2))
+    grouped_bars(ax, list(IENF_RUNS), runs, metrics)
+    ax.set_xticks(np.arange(len(metrics)), [METRIC_LABELS[m].replace('tumor', 'disease') for m in metrics])
+    ax.set_ylim(0.5, 1.0)
+    ax.set_ylabel('Test set value (mean ± SD)')
+    ax.set_title('IENF normal vs. disease: test performance (5 folds)')
+    legend_below(ax, _ienf_handles())
+    note(fig, 'CLAM-SB small, UNI features, patient-level 5-fold CV. Positive class = disease (DM + FAP). The y-axis starts at 0.5.')
+    save(fig, path)
+
+
+def fig_ienf_per_fold(runs, path):
+    keys = list(IENF_RUNS)
+    fig, ax = plt.subplots(figsize=(9, 4))
+    offs = np.linspace(-0.27, 0.27, len(keys))
+    for k in range(IENF_K):
+        ax.plot(k + offs, [runs[key]['folds'].auc.values[k] for key in keys], color=AXIS, lw=1.2, zorder=1)
+    for off, key in zip(offs, keys):
+        ax.plot(np.arange(IENF_K) + off, runs[key]['folds'].auc.values, 'o', ms=8, color=RUNS[key]['color'],
+                mec=SURFACE, mew=1.5, zorder=3)
+    ax.set_xticks(np.arange(IENF_K), [f'Fold {k}' for k in range(IENF_K)])
+    ax.set_ylabel('Test AUC')
+    ax.grid(axis='x', visible=False)
+    ax.set_title('Test AUC per fold (same test patients for all runs within a fold)')
+    legend_below(ax, _ienf_handles(marker=True))
+    save(fig, path)
+
+
+def fig_ienf_roc_pr(runs, path):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.6))
+    for key in IENF_RUNS:
+        c, preds = RUNS[key]['color'], runs[key]['preds']
+        grid, m, s = mean_roc(preds)
+        axes[0].fill_between(grid, np.clip(m - s, 0, 1), np.clip(m + s, 0, 1), color=c, alpha=0.08, lw=0)
+        axes[0].plot(grid, m, color=c, label=f'{RUNS[key]["name"]} (AUC {runs[key]["folds"].auc.mean():.3f})')
+        grid, m, s = mean_pr(preds)
+        axes[1].plot(grid, m, color=c, label=RUNS[key]['name'])
+    axes[0].plot([0, 1], [0, 1], color=AXIS, lw=1)
+    axes[0].set(xlim=(0, 1), ylim=(0, 1.01), xlabel='False positive rate', ylabel='True positive rate')
+    axes[0].set_title('Mean ROC curve')
+    axes[0].legend(loc='lower right')
+    axes[1].axhline(runs['ienf_224_b4']['preds'].y.mean(), color=AXIS, lw=1)
+    axes[1].set(xlim=(0, 1), ylim=(0, 1.01), xlabel='Recall', ylabel='Precision')
+    axes[1].set_title('Mean precision-recall curve (disease class)')
+    axes[1].legend(loc='lower left')
+    for ax in axes:
+        ax.set_aspect('equal')
+    note(fig, 'Averaged over the 5 test folds; ROC band = ±1 SD across folds. Gray line in the PR panel: share of disease slides (0.56).')
+    save(fig, path)
+
+
+def fig_ienf_groups(runs, path):
+    keys = list(IENF_RUNS)
+    fig, ax = plt.subplots(figsize=(9, 4.2))
+    width = 0.8 / len(keys)
+    rng = np.random.default_rng(0)
+    for i, key in enumerate(keys):
+        p = runs[key]['preds']
+        for g, (grp, _) in enumerate(IENF_GROUPS):
+            sel = p[p['sub'] == grp]
+            correct = (sel.pred == (0 if grp == 'Control' else 1))
+            pos = g + (i - (len(keys) - 1) / 2) * (width + 0.01)
+            ax.bar(pos, correct.mean(), width=width, color=RUNS[key]['color'], zorder=2)
+            per_fold = correct.groupby(sel.fold).mean().values
+            ax.plot(pos + rng.uniform(-0.04, 0.04, len(per_fold)), per_fold, 'o', ms=3.5, color=INK2, alpha=0.7, zorder=3)
+    ax.set_xticks(range(len(IENF_GROUPS)), [lab for _, lab in IENF_GROUPS])
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel('Share classified correctly')
+    ax.set_title('Correct classification by diagnosis (pooled over 5 test folds)')
+    ax.grid(axis='x', visible=False)
+    legend_below(ax, _ienf_handles())
+    note(fig, 'Bars: pooled share (Control n = 172, DM n = 99, FAP n = 116 slides). Dots: individual folds.')
+    save(fig, path)
+
+
+def fig_ienf_training(runs, path):
+    fig, axes = plt.subplots(1, 3, figsize=(13, 3.8))
+    for ax, tag, t in zip(axes, ['train/loss', 'val/loss', 'val/auc'], ['Training loss', 'Validation loss', 'Validation AUC']):
+        for key in IENF_RUNS:
+            m = curve_matrix(runs[key], tag)
+            mu, c = m.mean(0), RUNS[key]['color']
+            ax.plot(np.arange(len(mu)), mu, color=c, lw=1.6)
+            if tag == 'val/loss':
+                b = int(np.argmin(mu))
+                ax.plot(b, mu[b], 'o', ms=7, color=c, mec=SURFACE, mew=2, zorder=5)
+        ax.set_title(t)
+        ax.set_xlabel('Epoch')
+        ax.margins(x=0.01)
+    axes[0].set_ylim(bottom=0)
+    axes[1].set_ylim(bottom=0)
+    legend_below(axes[0], [Line2D([], [], color=RUNS[k]['color'], label=RUNS[k]['name']) for k in IENF_RUNS]
+                 + [Line2D([], [], color=INK2, marker='o', lw=0, ms=7, mec=SURFACE, label='Lowest mean val loss')])
+    note(fig, 'Mean over 5 folds, first 52 epochs (every fold ran exactly 52).')
+    save(fig, path)
+
+
+IENF_HEATMAPS = os.path.join(os.path.dirname(RESULTS), 'heatmaps', 'ienf')
+
+
+def fig_ienf_heatmap_overlap(path, slides=('FP_S425-2_b', 'TN_S1616-2_b')):
+    """Same slide, same model: heatmap with 50% overlap vs. 95% overlap + blur (heatmaps/ienf_heatmaps.py output)."""
+    variants = [('ienf_2cls_uni_p128_CLAM_B8_s1', '50% overlap (step 64 px), no blur'),
+                ('ienf_2cls_uni_p128_CLAM_B8_s1_overlap95_blur', '95% overlap (step 6 px) + Gaussian blur')]
+    files = [[os.path.join(IENF_HEATMAPS, d, 'slides', f'{s}_heatmap_roi.jpg') for d, _ in variants] for s in slides]
+    if not all(os.path.isfile(f) for row in files for f in row):
+        print('skipped', os.path.basename(path), '(heatmaps not found)')
+        return
+    fig, axes = plt.subplots(len(slides) * 2, 1, figsize=(12, 2.6 * len(slides) * 2))
+    for i, s in enumerate(slides):
+        for j, (_, label) in enumerate(variants):
+            ax = axes[2 * i + j]
+            ax.imshow(Image.open(files[i][j]))
+            ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+            ax.set_title(f'{s.replace("_", " ", 1)}: {label}', fontsize=10)
+    note(fig, 'CLAM-SB, 128 px, B = 8. Colors: attention percentile within the slide (jet; blue = low, red = high).')
+    save(fig, path)
+
+
+def ienf_figures(shared):
+    fig_ienf_heatmap_overlap(os.path.join(shared, 'ienf_heatmap_overlap.png'))
+    runs = load_ienf()
+    fig_ienf_metrics(runs, os.path.join(shared, 'ienf_metrics.png'))
+    fig_ienf_per_fold(runs, os.path.join(shared, 'ienf_per_fold_auc.png'))
+    fig_ienf_roc_pr(runs, os.path.join(shared, 'ienf_roc_pr.png'))
+    fig_ienf_groups(runs, os.path.join(shared, 'ienf_by_diagnosis.png'))
+    fig_ienf_training(runs, os.path.join(shared, 'ienf_training_curves.png'))
+
+
 # ----------------------------------------------------------------------------- main
 def main():
+    if '--only' in sys.argv and sys.argv[sys.argv.index('--only') + 1] == 'ienf':
+        ienf_figures(os.path.join(RESULTS, 'figures'))
+        return
     labels = pd.read_excel(LABELS_4CLS).set_index('slide').label.to_dict()
     runs = {key: load_run(key, labels) for key in RUNS}
     RUNS['r50_b8']['name'] = 'B = 8'  # only shown next to B = 32
@@ -1471,6 +1637,7 @@ def main():
     fig_lr_paired_diff(lr, os.path.join(shared, 'lr_paired_differences.png'))
     fig_lr_curves(lr, os.path.join(shared, 'lr_loss_curves.png'))
     fig_lr_best_epoch(lr, os.path.join(shared, 'lr_best_epoch.png'))
+    ienf_figures(shared)
 
 
 if __name__ == '__main__':

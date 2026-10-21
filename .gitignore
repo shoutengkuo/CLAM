@@ -8,3 +8,8 @@ logs/
 feature_stats/
 eval_results/
 .claude/settings.local.json
+
+# IENF: images derived from patient biopsies stay local (public repo)
+heatmaps/ienf/**/slides/
+heatmaps/ienf/**/overview.png
+results/figures/ienf_heatmap_overlap.png

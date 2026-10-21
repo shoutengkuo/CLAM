@@ -140,12 +140,15 @@ class CLAM_SB(nn.Module):
         device=h.device
         if len(A.shape) == 1:
             A = A.view(1, -1)
-        top_p_ids = torch.topk(A, self.k_sample)[1][-1]
+        # small bags (e.g. IENF): cap k at N // 2 so the top-k (positive) and bottom-k (negative)
+        # patches never overlap; bags with N >= 2B are unchanged
+        k = max(1, min(self.k_sample, A.shape[-1] // 2))
+        top_p_ids = torch.topk(A, k)[1][-1]
         top_p = torch.index_select(h, dim=0, index=top_p_ids)
-        top_n_ids = torch.topk(-A, self.k_sample, dim=1)[1][-1]
+        top_n_ids = torch.topk(-A, k, dim=1)[1][-1]
         top_n = torch.index_select(h, dim=0, index=top_n_ids)
-        p_targets = self.create_positive_targets(self.k_sample, device)
-        n_targets = self.create_negative_targets(self.k_sample, device)
+        p_targets = self.create_positive_targets(k, device)
+        n_targets = self.create_negative_targets(k, device)
 
         all_targets = torch.cat([p_targets, n_targets], dim=0)
         all_instances = torch.cat([top_p, top_n], dim=0)
@@ -159,9 +162,10 @@ class CLAM_SB(nn.Module):
         device=h.device
         if len(A.shape) == 1:
             A = A.view(1, -1)
-        top_p_ids = torch.topk(A, self.k_sample)[1][-1]
+        k = max(1, min(self.k_sample, A.shape[-1] // 2))  # same cap as inst_eval
+        top_p_ids = torch.topk(A, k)[1][-1]
         top_p = torch.index_select(h, dim=0, index=top_p_ids)
-        p_targets = self.create_negative_targets(self.k_sample, device)
+        p_targets = self.create_negative_targets(k, device)
         logits = classifier(top_p)
         p_preds = torch.topk(logits, 1, dim = 1)[1].squeeze(1)
         instance_loss = self.instance_loss_fn(logits, p_targets)

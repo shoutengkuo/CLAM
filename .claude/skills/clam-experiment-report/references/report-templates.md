@@ -43,7 +43,7 @@ val / test slides, test negative, test positive (with a subtype breakdown if ava
 Say explicitly if the splits are shared with other runs ("identical files").
 
 ## 4. Training Configuration
-The exact training command in a bash block (wrapped with \ for readability), then a settings table:
+The exact training command in a bash block, broken over several lines with \ (one group of related flags per line, never a single long line), then a settings table:
 model + layer widths, embed dim, dropout, optimizer, losses + B, loss weighting, class-imbalance
 handling, max epochs, early-stopping rule, seed.
 End with one sentence: "Compared with <baseline run>, only <flags> changed." Explain any forced
