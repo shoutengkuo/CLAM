@@ -1,0 +1,19 @@
+{
+ "slide": "S1616-2_b",
+ "W": 3815,
+ "H": 1039,
+ "n_vertices": 172,
+ "buffer_added": 17005,
+ "p224": {
+  "candidates": 48,
+  "kept": 22
+ },
+ "p128": {
+  "candidates": 108,
+  "kept": 50
+ },
+ "fold": 0,
+ "p_disease": 0.0012202232610434294,
+ "n_bag": 50,
+ "fine_patches": 19458
+}

@@ -13,3 +13,6 @@ eval_results/
 heatmaps/ienf/**/slides/
 heatmaps/ienf/**/overview.png
 results/figures/ienf_heatmap_overlap.png
+results/ienf_preprocessing_walkthrough/figures/
+results/ienf_preprocessing_walkthrough/*.npz
+results/ienf_preprocessing_walkthrough_simple/figures/
