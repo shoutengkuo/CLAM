@@ -3,7 +3,8 @@
 Reuses the helpers and constants of heatmaps/ienf_walkthrough.py and its cached 95%-overlap scores
 (run that script first). Figures:
 
-  s0 overview (all steps on one page)   s5 extracted patches
+  s0 overview (all steps on one page,   s5 extracted patches
+     each panel also saved alone)
   s1 original image                     s6 UNI features
   s2 epidermis ROI                      s7 CLAM attention + prediction
   s3 mask + 5 px buffer                 s8 heatmap vs. original
@@ -275,23 +276,41 @@ def main():
     fig.tight_layout()
     save(fig, out, 's8_heatmap.png')
 
-    # ------------------------------------------------------------------ s0 overview
+    # ------------------------------------------------------------------ s0 overview (+ each panel alone, native resolution)
+    def draw_panel(i, ax, lw):
+        if i == 2:
+            ax.imshow(buf[cy0:cy1, cx0:cx1], cmap='gray', extent=ext, interpolation='nearest'); off(ax)
+            return
+        show_crop(ax, {1: roi_img, 5: hm}.get(i))
+        if i == 1:
+            ax.plot(poly[:, 0].tolist() + [poly[0, 0]], poly[:, 1].tolist() + [poly[0, 1]], color=wt.C_ROI, lw=lw)
+        elif i == 3:
+            draw_grid(ax, grids[ps], ps, lw=lw)
+        elif i == 4:
+            draw_attention(ax)
+
+    panels = [('1_original', '1  original'), ('2_epidermis_roi', '2  epidermis ROI'),
+              ('3_mask_buffer', f'3  mask + {wt.BUFFER} px buffer'), (f'4_patch_grid_{ps}', f'4  {ps} px patch grid'),
+              ('7_attention', '7  attention per patch'), ('8_heatmap', '8  heatmap')]
     fig, axes = plt.subplots(6, 1, figsize=(12, 16.8))
-    labels = ['1  original', '2  epidermis ROI', f'3  mask + {wt.BUFFER} px buffer', f'4  {ps} px patch grid',
-              '7  attention per patch', '8  heatmap']
-    show_crop(axes[0])
-    show_crop(axes[1], roi_img)
-    axes[1].plot(poly[:, 0].tolist() + [poly[0, 0]], poly[:, 1].tolist() + [poly[0, 1]], color=wt.C_ROI, lw=1)
-    axes[2].imshow(buf[cy0:cy1, cx0:cx1], cmap='gray', extent=ext, interpolation='nearest'); off(axes[2])
-    show_crop(axes[3]); draw_grid(axes[3], grids[ps], ps, lw=1)
-    show_crop(axes[4]); draw_attention(axes[4])
-    show_crop(axes[5], hm)
-    for a, l in zip(axes, labels):
+    for i, (a, (_, l)) in enumerate(zip(axes, panels)):
+        draw_panel(i, a, 1)
         a.set_title(l, loc='left', fontsize=12, fontweight='semibold')
     fig.suptitle(f'{sid}: from image to heatmap (steps 5–6, patches → UNI features, run between 4 and 7)',
                  x=0.01, ha='left', fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.985))
     save(fig, out, 's0_overview.png')
+
+    # one image per overview panel, 1 image pixel = 1 slide pixel, no title or margin
+    pdir = out / 's0_overview_panels'
+    pdir.mkdir(exist_ok=True)
+    for i, (name, _) in enumerate(panels):
+        fig = plt.figure(figsize=((cx1 - cx0) / 100, (cy1 - cy0) / 100), dpi=100)
+        ax = fig.add_axes([0, 0, 1, 1])
+        draw_panel(i, ax, 2)
+        fig.savefig(pdir / f's0_{name}.png', dpi=100, bbox_inches=None, pad_inches=0)
+        plt.close(fig)
+        print('wrote', f's0_overview_panels/s0_{name}.png')
 
     with open(Path(args.out_dir) / 'facts.json', 'w') as fh:
         json.dump(facts, fh, indent=1, default=float)
