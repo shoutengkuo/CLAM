@@ -9,6 +9,8 @@ Camelyon+ 4-class label file, and writes PNG figures:
 Usage (from the repo root):
   python results/make_report_figures.py              # all figures
   python results/make_report_figures.py --only ienf  # only the IENF report figures
+  python results/make_report_figures.py --only ienf_isfn  # only the IENF + iSFN report figures
+  python results/make_report_figures.py --only ienf_ablation  # only the IENF ablation figures
 """
 import glob
 import os
@@ -1568,10 +1570,384 @@ def ienf_figures(shared):
     fig_ienf_training(runs, os.path.join(shared, 'ienf_training_curves.png'))
 
 
+# ----------------------------------------------------------------------------- IENF 2-class with iSFN (Control vs. DM + FAP + iSFN)
+# New preprocessing (intensity normalization, mask outside ROI + 20 px, >= 10% rule), rebalanced folds.
+# Hue = patch size (128 keeps the violet of the earlier 128 px runs); the earlier run is a gray reference.
+ISFN_RUNS = {
+    'isfn_128': ('ienf_isfn_2cls_uni_p128_CLAM_B8_s1', '128 px, B = 8', '#4a3aa7'),
+    'isfn_64': ('ienf_isfn_2cls_uni_p64_CLAM_B16_s1', '64 px, B = 16', '#e87ba4'),
+    'isfn_32': ('ienf_isfn_2cls_uni_p32_CLAM_B32_s1', '32 px, B = 32', '#008300'),
+    'isfn_16': ('ienf_isfn_2cls_uni_p16_CLAM_B64_s1', '16 px, B = 64', '#e34948'),
+}
+ISFN_OLD = ('isfn_old', 'ienf_2cls_uni_p128_CLAM_B8_s1', 'earlier 128 px, B = 8 (old pipeline, no iSFN)', REF_GRAY)
+ISFN_GROUPS = [('Control', 'batch1'), ('Control', 'batch2'), ('DM', 'batch1'), ('DM', 'batch2'),
+               ('FAP', 'batch1'), ('FAP', 'batch2'), ('iSFN', 'batch2')]
+
+
+def load_isfn():
+    global K
+    meta = pd.read_csv(os.path.join(os.path.dirname(RESULTS), 'dataset_csv', 'ienf_isfn_4sub.csv')).set_index('slide_id')
+    pat = pd.read_csv(os.path.join(os.path.dirname(RESULTS), 'splits', 'ienf_isfn_kfold5_rebalanced', 'patients.csv')).set_index('case_id')
+    new_fold = meta.case_id.map(pat.fold)
+    out, k_saved = {}, K
+    K = IENF_K
+    keys = [(k, *v) for k, v in ISFN_RUNS.items()] + [ISFN_OLD]
+    for key, d, name, color in keys:
+        RUNS[key] = dict(dir=d, name=name, color=color)
+        r = load_run(key, meta.label.to_dict())
+        r['preds']['batch'] = r['preds'].slide.map(meta.batch)
+        r['preds']['new_fold'] = r['preds'].slide.map(new_fold)
+        out[key] = r
+    K = k_saved
+    return out
+
+
+def _isfn_handles(marker=None, old=True):
+    kw = dict(marker='o', lw=0, ms=8) if marker else dict(lw=8)
+    keys = list(ISFN_RUNS) + ([ISFN_OLD[0]] if old else [])
+    return [Line2D([], [], color=RUNS[k]['color'], label=RUNS[k]['name'], **kw) for k in keys]
+
+
+def fig_isfn_metrics(runs, path):
+    metrics = ['auc', 'acc', 'bacc', 'sens', 'spec', 'f1_tumor', 'map_macro']
+    fig, ax = plt.subplots(figsize=(12.5, 4.2))
+    grouped_bars(ax, list(ISFN_RUNS) + [ISFN_OLD[0]], runs, metrics, width=0.15)
+    ax.set_xticks(np.arange(len(metrics)), [METRIC_LABELS[m].replace('tumor', 'disease') for m in metrics])
+    ax.set_ylim(0.5, 1.0)
+    ax.set_ylabel('Test set value (mean ± SD)')
+    ax.set_title('IENF normal vs. disease with iSFN: test performance (5 folds)')
+    legend_below(ax, _isfn_handles())
+    note(fig, 'New runs: 433 slides, rebalanced folds. Gray: the earlier run (387 slides without iSFN, earlier folds), '
+              'shown as context, not a paired comparison. The y-axis starts at 0.5.')
+    save(fig, path)
+
+
+def fig_isfn_per_fold(runs, path):
+    keys = list(ISFN_RUNS)
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.2), sharey=True)
+    offs = np.linspace(-0.27, 0.27, len(keys) + 1)
+    for ax, subset in zip(axes, ['all', 'no_isfn']):
+        vals = {}
+        for key in keys:
+            p = runs[key]['preds']
+            if subset == 'no_isfn':
+                p = p[p['sub'] != 'iSFN']
+            vals[key] = [roc_auc_score(g.y, g.p) for _, g in p.groupby('fold')]
+        if subset == 'no_isfn':  # earlier predictions of the same slides, grouped by the NEW test folds
+            p = runs[ISFN_OLD[0]]['preds']
+            vals[ISFN_OLD[0]] = [roc_auc_score(g.y, g.p) for _, g in p.groupby('new_fold')]
+        ks = list(vals)
+        for k in range(IENF_K):
+            ax.plot(k + offs[:len(ks)], [vals[key][k] for key in ks], color=AXIS, lw=1.2, zorder=1)
+        for off, key in zip(offs, ks):
+            ax.plot(np.arange(IENF_K) + off, vals[key], 'o', ms=8, color=RUNS[key]['color'], mec=SURFACE, mew=1.5, zorder=3)
+        ax.set_xticks(np.arange(IENF_K), [f'Fold {k}' for k in range(IENF_K)])
+        ax.grid(axis='x', visible=False)
+    axes[0].set_ylabel('Test AUC')
+    axes[0].set_title('All test slides (with iSFN)')
+    axes[1].set_title('Control / DM / FAP test slides only')
+    legend_below(axes[0], _isfn_handles(marker=True))
+    note(fig, 'Right panel, gray: out-of-fold predictions of the earlier run for the same slides, grouped by the new test folds '
+              '(those predictions were used to build the folds).')
+    save(fig, path)
+
+
+def fig_isfn_roc_pr(runs, path):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.6))
+    for key in ISFN_RUNS:
+        c, preds = RUNS[key]['color'], runs[key]['preds']
+        grid, m, s = mean_roc(preds)
+        axes[0].fill_between(grid, np.clip(m - s, 0, 1), np.clip(m + s, 0, 1), color=c, alpha=0.07, lw=0)
+        axes[0].plot(grid, m, color=c, label=f'{RUNS[key]["name"]} (AUC {runs[key]["folds"].auc.mean():.3f})')
+        grid, m, s = mean_pr(preds)
+        axes[1].plot(grid, m, color=c, label=RUNS[key]['name'])
+    axes[0].plot([0, 1], [0, 1], color=AXIS, lw=1)
+    axes[0].set(xlim=(0, 1), ylim=(0, 1.01), xlabel='False positive rate', ylabel='True positive rate')
+    axes[0].set_title('Mean ROC curve')
+    axes[0].legend(loc='lower right')
+    prior = runs['isfn_128']['preds'].y.mean()
+    axes[1].axhline(prior, color=AXIS, lw=1)
+    axes[1].set(xlim=(0, 1), ylim=(0, 1.01), xlabel='Recall', ylabel='Precision')
+    axes[1].set_title('Mean precision-recall curve (disease class)')
+    axes[1].legend(loc='lower left')
+    for ax in axes:
+        ax.set_aspect('equal')
+    note(fig, f'Averaged over the 5 test folds; ROC band = ±1 SD across folds. Gray line in the PR panel: share of disease slides ({prior:.2f}).')
+    save(fig, path)
+
+
+def fig_isfn_groups(runs, path):
+    keys = list(ISFN_RUNS) + [ISFN_OLD[0]]
+    fig, ax = plt.subplots(figsize=(13, 4.4))
+    width = 0.8 / len(keys)
+    labels = []
+    for g, (sub, batch) in enumerate(ISFN_GROUPS):
+        n = None
+        for i, key in enumerate(keys):
+            p = runs[key]['preds']
+            sel = p[(p['sub'] == sub) & (p.batch == batch)]
+            if not len(sel):
+                continue
+            n = len(sel)
+            correct = (sel.pred == (0 if sub == 'Control' else 1)).mean()
+            ax.bar(g + (i - (len(keys) - 1) / 2) * (width + 0.01), correct, width=width, color=RUNS[key]['color'], zorder=2)
+        kind = 'specificity' if sub == 'Control' else 'sensitivity'
+        labels.append(f'{sub}, {batch}\n({kind}, n = {n})')
+    ax.set_xticks(range(len(ISFN_GROUPS)), labels, fontsize=9)
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel('Share classified correctly')
+    ax.set_title('Correct classification by diagnosis and image batch (pooled over 5 test folds)')
+    ax.grid(axis='x', visible=False)
+    legend_below(ax, _isfn_handles())
+    note(fig, 'batch1 and batch2 = the two image deliveries (first and second batch). All iSFN slides are in batch2, so the gray reference has no iSFN bar.')
+    save(fig, path)
+
+
+def fig_isfn_training(runs, path):
+    fig, axes = plt.subplots(1, 3, figsize=(13, 3.8))
+    for ax, tag, t in zip(axes, ['train/loss', 'val/loss', 'val/auc'], ['Training loss', 'Validation loss', 'Validation AUC']):
+        for key in ISFN_RUNS:
+            m = curve_matrix(runs[key], tag)
+            mu, c = m.mean(0), RUNS[key]['color']
+            ax.plot(np.arange(len(mu)), mu, color=c, lw=1.6)
+            if tag == 'val/loss':
+                b = int(np.argmin(mu))
+                ax.plot(b, mu[b], 'o', ms=7, color=c, mec=SURFACE, mew=2, zorder=5)
+        ax.set_title(t)
+        ax.set_xlabel('Epoch')
+        ax.margins(x=0.01)
+    axes[0].set_ylim(bottom=0)
+    axes[1].set_ylim(bottom=0)
+    legend_below(axes[0], [Line2D([], [], color=RUNS[k]['color'], label=RUNS[k]['name']) for k in ISFN_RUNS]
+                 + [Line2D([], [], color=INK2, marker='o', lw=0, ms=7, mec=SURFACE, label='Lowest mean val loss')])
+    note(fig, 'Mean over 5 folds, first 52 epochs (every fold ran at least 52; a few ran 54–65).')
+    save(fig, path)
+
+
+def isfn_figures(shared):
+    runs = load_isfn()
+    fig_isfn_metrics(runs, os.path.join(shared, 'ienf_isfn_metrics.png'))
+    fig_isfn_per_fold(runs, os.path.join(shared, 'ienf_isfn_per_fold_auc.png'))
+    fig_isfn_roc_pr(runs, os.path.join(shared, 'ienf_isfn_roc_pr.png'))
+    fig_isfn_groups(runs, os.path.join(shared, 'ienf_isfn_by_subtype_batch.png'))
+    fig_isfn_training(runs, os.path.join(shared, 'ienf_isfn_training_curves.png'))
+
+
+# ----------------------------------------------------------------------------- IENF ablation ladder (128 px, B = 8)
+AB_RUNGS = {  # rung: (exp_code without seed, short label)
+    'A': ('ienf_ab_A_oldprep_noisfn_p128_CLAM_B8', 'A  earlier prep,\nno iSFN'),
+    'B': ('ienf_ab_B_oldprep_p128_CLAM_B8', 'B  + iSFN'),
+    'C': ('ienf_ab_C_buf20_p128_CLAM_B8', 'C  + buffer 20 px,\n≥ 10% ROI'),
+    'D': ('ienf_ab_D_mask_p128_CLAM_B8', 'D  + mask'),
+    'E': ('ienf_isfn_2cls_uni_p128_CLAM_B8', 'E  + normalization\n(new pipeline)'),
+}
+AB_SEEDS = [1, 2, 3]
+AB_MEAN = '#256abf'
+
+
+def load_ablation():
+    """Per-slide test predictions of every rung and seed, with subtype, batch and the normalization QC flag."""
+    root = os.path.dirname(RESULTS)
+    meta = pd.read_csv(os.path.join(root, 'dataset_csv', 'ienf_isfn_4sub.csv')).set_index('slide_id')
+    qc = pd.read_csv('/var/tmp/shouteng_data/IENF_CLAM/images_norm_bufdown20/normalize_qc.csv').set_index('slide_id')
+    rows = []
+    for rung, (exp, _) in AB_RUNGS.items():
+        for seed in AB_SEEDS:
+            for k in range(5):
+                with open(os.path.join(RESULTS, f'{exp}_s{seed}', f'split_{k}_results.pkl'), 'rb') as f:
+                    for s, v in pickle.load(f).items():
+                        rows.append(dict(rung=rung, seed=seed, fold=k, slide=s, y=int(v['label']), p=float(v['prob'][0][1])))
+    p = pd.DataFrame(rows).join(meta[['label', 'batch']], on='slide').join(qc[['within_applied']], on='slide')
+    p['ok'] = (p.p >= 0.5).astype(int) == p.y
+    return p
+
+
+def _ab_fold_metrics(p):
+    """Fold-level metrics on the 387 Control/DM/FAP slides (shared by all rungs), per rung, seed and fold."""
+    rows = []
+    for (rung, seed, k), g in p[p.label != 'iSFN'].groupby(['rung', 'seed', 'fold']):
+        c = g[g.label == 'Control']
+        sens, spec = g[g.y == 1].ok.mean(), c.ok.mean()
+        rows.append(dict(rung=rung, seed=seed, fold=k, auc=roc_auc_score(g.y, g.p), sens=sens, spec=spec, bacc=(sens + spec) / 2,
+                         spec_b1=c[c.batch == 'batch1'].ok.mean(), spec_b2=c[c.batch == 'batch2'].ok.mean()))
+    return pd.DataFrame(rows)
+
+
+AB_SHORT = {'A': 'A\nearlier prep,\nno iSFN', 'B': 'B\n+ iSFN', 'C': 'C\n+ buffer 20,\n≥ 10% ROI', 'D': 'D\n+ mask', 'E': 'E\n+ normal-\nization'}
+
+
+def _ab_ladder_panel(ax, per_seed, title, ylim=None, short=False):
+    """Seed dots just left of each rung, the seed mean on the rung with its value to the right."""
+    x = np.arange(len(AB_RUNGS))
+    for i, rung in enumerate(AB_RUNGS):
+        v = per_seed[per_seed.rung == rung].value.values
+        ax.scatter(np.full(len(v), i - 0.16), v, s=16, color=MUTED, zorder=3)
+    means = per_seed.groupby('rung').value.mean().reindex(list(AB_RUNGS))
+    ax.plot(x, means.values, color=AB_MEAN, marker='o', ms=6, lw=1.6, zorder=4)
+    for i, m in enumerate(means.values):
+        if np.isfinite(m):
+            ax.annotate(f'{m:.3f}', (i, m), textcoords='offset points', xytext=(7, -3), ha='left', va='top',
+                        fontsize=8, color=AB_MEAN)
+    ax.set_xticks(x, [AB_SHORT[r] if short else AB_RUNGS[r][1] for r in AB_RUNGS], fontsize=8)
+    ax.set_xlim(-0.45, len(AB_RUNGS) - 0.4)
+    ax.set_title(title)
+    ax.grid(axis='x', visible=False)
+    if ylim:
+        ax.set_ylim(*ylim)
+
+
+def _ab_handles():
+    return [Line2D([], [], color=AB_MEAN, marker='o', label='mean of 3 seeds'),
+            Line2D([], [], color=MUTED, marker='o', ls='', label='one seed (mean over 5 folds)')]
+
+
+def fig_ablation_ladder(fm, path):
+    seed_means = fm.groupby(['rung', 'seed'])[['auc', 'spec', 'sens', 'bacc']].mean().reset_index()
+    fig, axes = plt.subplots(2, 2, figsize=(13, 7.6))
+    for ax, (m, title) in zip(axes.flat, [('auc', 'AUC'), ('spec', 'Specificity (Control)'),
+                                          ('sens', 'Sensitivity (DM + FAP)'), ('bacc', 'Balanced accuracy')]):
+        _ab_ladder_panel(ax, seed_means[['rung', m]].rename(columns={m: 'value'}), title)
+        lo, hi = seed_means[m].min(), seed_means[m].max()
+        ax.set_ylim(lo - 0.03, hi + 0.035)
+    legend_below(axes[1, 0], _ab_handles())
+    note(fig, 'All rungs: 128 px, B = 8, rebalanced folds, Control/DM/FAP test slides only (387; iSFN excluded so that A is comparable). '
+              'Each rung adds one change to the one before.')
+    save(fig, path)
+
+
+def fig_ablation_batches(p, fm, path):
+    seed_means = fm.groupby(['rung', 'seed'])[['spec_b1', 'spec_b2']].mean().reset_index()
+    isfn = p[p.label == 'iSFN'].groupby(['rung', 'seed']).ok.mean().reset_index().rename(columns={'ok': 'value'})
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.4))
+    _ab_ladder_panel(axes[0], seed_means[['rung', 'spec_b1']].rename(columns={'spec_b1': 'value'}), 'Specificity, Control batch1 (116 slides)', (0.55, 0.95), short=True)
+    _ab_ladder_panel(axes[1], seed_means[['rung', 'spec_b2']].rename(columns={'spec_b2': 'value'}), 'Specificity, Control batch2 (56 slides)', (0.55, 0.95), short=True)
+    full = pd.concat([pd.DataFrame(dict(rung=['A'], seed=[0], value=[np.nan])), isfn])
+    _ab_ladder_panel(axes[2], full, 'Sensitivity, iSFN (46 slides; not in A)', (0.55, 1.0), short=True)
+    legend_below(axes[0], _ab_handles())
+    note(fig, 'Batch specificities are means of fold-level values (fold sizes are small: about 11 batch2 Controls per fold).')
+    save(fig, path)
+
+
+def fig_ablation_steps(fm, path):
+    """Per-fold change from the previous rung (mean over the 3 seeds)."""
+    f = fm.groupby(['rung', 'fold'])[['auc', 'spec', 'sens']].mean()
+    order = list(AB_RUNGS)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), sharey=False)
+    for ax, (m, title) in zip(axes, [('auc', 'Δ AUC'), ('spec', 'Δ specificity'), ('sens', 'Δ sensitivity')]):
+        for i, (a, b) in enumerate(zip(order, order[1:])):
+            d = (f.loc[b, m] - f.loc[a, m]).values
+            ax.scatter(np.full(len(d), i) + np.linspace(-0.12, 0.12, len(d)), d, s=22, color=MUTED, zorder=3)
+            ax.plot([i - 0.22, i + 0.22], [d.mean()] * 2, color=AB_MEAN, lw=2.2, zorder=4)
+        ax.axhline(0, color=AXIS, lw=1, zorder=1)
+        ax.set_xticks(range(len(order) - 1), [f'{a} → {b}' for a, b in zip(order, order[1:])])
+        ax.set_title(title)
+        ax.grid(axis='x', visible=False)
+    legend_below(axes[0], [Line2D([], [], color=AB_MEAN, lw=2.2, label='mean over folds'),
+                           Line2D([], [], color=MUTED, marker='o', ls='', label='one test fold (mean of 3 seeds)')])
+    note(fig, 'A → B: + iSFN;  B → C: buffer 20 px, ≥ 10% ROI;  C → D: mask outside ROI + 20 px;  D → E: intensity normalization.')
+    save(fig, path)
+
+
+def fig_ablation_norm_controls(p, path):
+    """Seed-averaged P(disease) of every Control slide without (D) and with (E) normalization."""
+    w = p[(p.label == 'Control') & p.rung.isin(['D', 'E'])].groupby(['slide', 'rung']).p.mean().unstack()
+    info = p[p.label == 'Control'].drop_duplicates('slide').set_index('slide')[['batch', 'within_applied']]
+    w = w.join(info)
+    fig, ax = plt.subplots(figsize=(6.4, 6.0))
+    styles = {(False, 'batch1'): ('#9ec5f4', 'o'), (False, 'batch2'): ('#9ec5f4', 's'),
+              (True, 'batch1'): ('#e34948', 'o'), (True, 'batch2'): ('#e34948', 's')}
+    for (wa, b), (col, mk) in styles.items():
+        s = w[(w.within_applied == wa) & (w.batch == b)]
+        ax.scatter(s.D, s.E, s=26 if wa else 16, color=col, marker=mk, edgecolor=INK if wa else 'none', lw=0.5, zorder=3 if wa else 2)
+    ax.plot([0, 1], [0, 1], color=AXIS, lw=1, zorder=1)
+    ax.axhline(0.5, color=AXIS, lw=0.8, ls='--'); ax.axvline(0.5, color=AXIS, lw=0.8, ls='--')
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_xlabel('P(disease), D: mask only')
+    ax.set_ylabel('P(disease), E: mask + normalization')
+    ax.set_title('Control slides: effect of normalization')
+    legend_below(ax, [Line2D([], [], color='#9ec5f4', marker='o', ls='', label='no within-image correction'),
+                      Line2D([], [], color='#e34948', marker='o', ls='', mec=INK, label='within-image correction applied'),
+                      Line2D([], [], color=MUTED, marker='s', ls='', label='batch2 (circles: batch1)')])
+    note(fig, 'Each dot: one Control slide, P averaged over 3 seeds. Above the diagonal = looks more diseased after normalization;\n'
+              'upper-left quadrant = correct without normalization, false positive with it.')
+    save(fig, path)
+
+
+AB_SIZES = {  # patch size: {rung: exp_code without seed}
+    128: {'D': 'ienf_ab_D_mask_p128_CLAM_B8', 'E': 'ienf_isfn_2cls_uni_p128_CLAM_B8'},
+    32: {'D': 'ienf_ab_D_mask_p32_CLAM_B32', 'E': 'ienf_isfn_2cls_uni_p32_CLAM_B32'},
+    16: {'D': 'ienf_ab_D_mask_p16_CLAM_B64', 'E': 'ienf_isfn_2cls_uni_p16_CLAM_B64'},
+}
+AB_DE_COLORS = {'D': '#008300', 'E': '#4a3aa7'}
+AB_DE_LABELS = {'D': 'D: mask only', 'E': 'E: mask + normalization'}
+
+
+def fig_ablation_patch_sizes(path):
+    """D vs. E at 128 / 32 / 16 px on all 433 slides: seed dots and seed means of the 5-fold means."""
+    meta = pd.read_csv(os.path.join(os.path.dirname(RESULTS), 'dataset_csv', 'ienf_isfn_4sub.csv')).set_index('slide_id')
+    rows = []
+    for ps, rungs in AB_SIZES.items():
+        for rung, exp in rungs.items():
+            for seed in AB_SEEDS:
+                folds, isfn_ok = [], []
+                for k in range(5):
+                    with open(os.path.join(RESULTS, f'{exp}_s{seed}', f'split_{k}_results.pkl'), 'rb') as f:
+                        d = pd.DataFrame([dict(slide=s, y=int(v['label']), p=float(v['prob'][0][1])) for s, v in pickle.load(f).items()])
+                    d = d.join(meta[['label']], on='slide')
+                    d['ok'] = (d.p >= 0.5).astype(int) == d.y
+                    folds.append(dict(auc=roc_auc_score(d.y, d.p), spec=d[d.label == 'Control'].ok.mean(),
+                                      sens=d[d.y == 1].ok.mean()))
+                    isfn_ok += d[d.label == 'iSFN'].ok.tolist()
+                # iSFN: pooled share of the 46 slides (fold sizes 8-10 are too small for fold means)
+                rows.append(dict(ps=ps, rung=rung, seed=seed, **pd.DataFrame(folds).mean(), isfn=np.mean(isfn_ok)))
+    r = pd.DataFrame(rows)
+    sizes = list(AB_SIZES)
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4.3))
+    for ax, (m, title) in zip(axes, [('auc', 'AUC'), ('spec', 'Specificity (Control)'),
+                                     ('sens', 'Sensitivity (DM + FAP + iSFN)'), ('isfn', 'Sensitivity, iSFN (pooled, 46 slides)')]):
+        for j, rung in enumerate(['D', 'E']):
+            off = (j - 0.5) * 0.22
+            g = r[r.rung == rung]
+            for i, ps in enumerate(sizes):
+                v = g[g.ps == ps][m].values
+                ax.scatter(np.full(len(v), i + off), v, s=14, color=AB_DE_COLORS[rung], alpha=0.45, zorder=3, lw=0)
+            means = [g[g.ps == ps][m].mean() for ps in sizes]
+            ax.plot(np.arange(len(sizes)) + off, means, color=AB_DE_COLORS[rung], marker='o', ms=6, lw=1.6, zorder=4)
+            for i, mv in enumerate(means):
+                ax.annotate(f'{mv:.3f}', (i + off, mv), textcoords='offset points', xytext=(0, 7 if rung == 'D' else -14),
+                            ha='center', fontsize=7.5, color=AB_DE_COLORS[rung])
+        ax.set_xticks(range(len(sizes)), [f'{ps} px' for ps in sizes])
+        ax.set_xlim(-0.5, len(sizes) - 0.5)
+        lo, hi = r[m].min(), r[m].max()
+        ax.set_ylim(lo - 0.03, hi + 0.03)
+        ax.set_title(title)
+        ax.grid(axis='x', visible=False)
+    legend_below(axes[0], [Line2D([], [], color=AB_DE_COLORS[k], marker='o', label=AB_DE_LABELS[k] + ' (mean of 3 seeds)') for k in 'DE']
+                 + [Line2D([], [], color=MUTED, marker='o', ls='', alpha=0.6, label='one seed (5-fold mean)')])
+    note(fig, 'All 433 test slides, rebalanced folds, buffer 20 px, ≥ 10% ROI + buffer. B = 8 / 32 / 64 for 128 / 32 / 16 px.')
+    save(fig, path)
+
+
+def ablation_figures(shared):
+    fig_ablation_patch_sizes(os.path.join(shared, 'ienf_ablation_patch_sizes.png'))
+    p = load_ablation()
+    fm = _ab_fold_metrics(p)
+    fig_ablation_ladder(fm, os.path.join(shared, 'ienf_ablation_ladder.png'))
+    fig_ablation_batches(p, fm, os.path.join(shared, 'ienf_ablation_batches.png'))
+    fig_ablation_steps(fm, os.path.join(shared, 'ienf_ablation_steps.png'))
+    fig_ablation_norm_controls(p, os.path.join(shared, 'ienf_ablation_norm_controls.png'))
+
+
 # ----------------------------------------------------------------------------- main
 def main():
     if '--only' in sys.argv and sys.argv[sys.argv.index('--only') + 1] == 'ienf':
         ienf_figures(os.path.join(RESULTS, 'figures'))
+        return
+    if '--only' in sys.argv and sys.argv[sys.argv.index('--only') + 1] == 'ienf_isfn':
+        isfn_figures(os.path.join(RESULTS, 'figures'))
+        return
+    if '--only' in sys.argv and sys.argv[sys.argv.index('--only') + 1] == 'ienf_ablation':
+        ablation_figures(os.path.join(RESULTS, 'figures'))
         return
     labels = pd.read_excel(LABELS_4CLS).set_index('slide').label.to_dict()
     runs = {key: load_run(key, labels) for key in RUNS}
@@ -1638,6 +2014,8 @@ def main():
     fig_lr_curves(lr, os.path.join(shared, 'lr_loss_curves.png'))
     fig_lr_best_epoch(lr, os.path.join(shared, 'lr_best_epoch.png'))
     ienf_figures(shared)
+    isfn_figures(shared)
+    ablation_figures(shared)
 
 
 if __name__ == '__main__':

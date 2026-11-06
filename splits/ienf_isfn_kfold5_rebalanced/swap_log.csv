@@ -1,0 +1,6 @@
+hard_case,from_fold,to_fold,easy_case,subtype,batch,n_slides,hard_max_wrong
+S2433-2,3,2,S1405-2,FAP,batch1,2,4
+S2135-2,3,1,S1619-2,FAP,batch1,2,4
+S3505-2,3,2,S236-2,Control,batch1,2,4
+S3705-2,4,1,S3061-2,Control,batch2,2,4
+S1233-2,3,2,S1423-2,DM,batch1,2,4
