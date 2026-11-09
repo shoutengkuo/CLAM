@@ -1,12 +1,20 @@
-"""Ablation splits: splits/ienf_isfn_kfold5_rebalanced with the iSFN slides removed, so the earlier
-Control/DM/FAP setup (task ienf_2cls, 387 slides) can be trained on the same rebalanced folds.
+"""Ablation splits: an iSFN split folder with the iSFN slides removed, so the earlier Control/DM/FAP setup
+(task ienf_2cls, 387 slides) can be trained on the same folds.
 
-    python create_splits_ienf_noisfn.py
+    python create_splits_ienf_noisfn.py   # rebalanced folds (default)
+    python create_splits_ienf_noisfn.py \\
+        --src splits/ienf_isfn_kfold5_random \\
+        --dst splits/ienf_kfold5_random_noisfn
 """
+import argparse
 import os
 import pandas as pd
 
-SRC, DST = 'splits/ienf_isfn_kfold5_rebalanced', 'splits/ienf_kfold5_rebalanced_noisfn'
+ap = argparse.ArgumentParser()
+ap.add_argument('--src', default='splits/ienf_isfn_kfold5_rebalanced')
+ap.add_argument('--dst', default='splits/ienf_kfold5_rebalanced_noisfn')
+a = ap.parse_args()
+SRC, DST = a.src, a.dst
 keep = set(pd.read_csv('dataset_csv/ienf_2cls.csv').slide_id)
 os.makedirs(DST, exist_ok=True)
 rows = []

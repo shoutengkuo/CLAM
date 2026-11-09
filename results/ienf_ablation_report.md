@@ -1,5 +1,7 @@
 # IENF Ablation: Which Preprocessing Change Costs Specificity? (3 Seeds; Ladder at 128 px, Follow-up at 32 / 16 px)
 
+> **Update (2026-11-07): random folds.** The folds here were rebalanced using earlier test results. [ienf_norm_random_folds_report.md](ienf_norm_random_folds_report.md) repeats this ladder on random, untuned folds and splits the normalization into within-image and between-image parts. At 32 px and 16 px the conclusions hold: normalization costs 0.05 AUC, and small patches beat 128 px (+0.04 AUC on random folds). At 128 px two findings do not hold on random folds: the mask no longer raises AUC, and normalization costs 0.03 rather than 0.10 specificity. The harmful part of the normalization is the between-image scaling, mainly of the green channel; the within-image correction is neutral.
+
 **Question.** The new IENF + iSFN pipeline ([ienf_isfn_2cls_report.md](ienf_isfn_2cls_report.md)) had lower specificity than the earlier 2-class pipeline ([ienf_2cls_patch_size_B_report.md](ienf_2cls_patch_size_B_report.md)). That comparison changed six things at once:
 - the folds;
 - iSFN added;

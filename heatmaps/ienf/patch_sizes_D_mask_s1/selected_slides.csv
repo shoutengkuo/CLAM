@@ -1,0 +1,5 @@
+slide_id,subtype,batch,y,fold,ps,run,p1,n_patches,fine50_step,fine50_n,fine95_blur_step,fine95_blur_n
+S1768-2_a,Control,batch1,0,3,32,ienf_ab_D_mask_p32_CLAM_B32_s1,0.004893,706,16,2823,2,180299
+S1768-2_a,Control,batch1,0,3,16,ienf_ab_D_mask_p16_CLAM_B64_s1,0.001587,2603,8,10417,2,166525
+S1445-2_a,DM,batch1,1,3,32,ienf_ab_D_mask_p32_CLAM_B32_s1,0.999992,899,16,3535,2,220869
+S1445-2_a,DM,batch1,1,3,16,ienf_ab_D_mask_p16_CLAM_B64_s1,1.0,3332,8,13208,2,210839

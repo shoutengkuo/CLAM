@@ -11,6 +11,7 @@ Usage (from the repo root):
   python results/make_report_figures.py --only ienf  # only the IENF report figures
   python results/make_report_figures.py --only ienf_isfn  # only the IENF + iSFN report figures
   python results/make_report_figures.py --only ienf_ablation  # only the IENF ablation figures
+  python results/make_report_figures.py --only ienf_norm_rf  # only the IENF normalization / random-fold figures
 """
 import glob
 import os
@@ -1938,8 +1939,192 @@ def ablation_figures(shared):
     fig_ablation_norm_controls(p, os.path.join(shared, 'ienf_ablation_norm_controls.png'))
 
 
+# ----------------------------------------------------------------------------- IENF normalization variants, random folds
+RF_LADDER = {'A': 'ienf_rf_A_oldprep_noisfn_p128_CLAM_B8', 'B': 'ienf_rf_B_oldprep_p128_CLAM_B8',
+             'C': 'ienf_rf_C_buf20_p128_CLAM_B8', 'D': 'ienf_rf_D_mask_p128_CLAM_B8', 'E': 'ienf_rf_E_full_p128_CLAM_B8'}
+RF_VARIANTS = {  # variant: (folder name part, short label)
+    'D': ('mask', 'D\nnone'), 'E': ('full', 'E\nwithin +\nbetween'), 'W': ('within', 'W\nwithin\nonly'),
+    'G': ('between', 'G\nbetween\nonly'), 'Gk': ('betweenkeepG', 'Gk\nbetween,\nG kept'),
+    'Bt': ('batchgain', 'Bt\nbatch\ngain'), 'F': ('featalign', 'F\nfeature\nalign'),
+}
+RF_SIZES = {128: (8, '#256abf'), 32: (32, '#eda100'), 16: (64, '#e34948')}  # patch size: (B, color)
+
+
+def _rf_exp(v, ps):
+    return f'ienf_rf_{v}_{RF_VARIANTS[v][0]}_p{ps}_CLAM_B{RF_SIZES[ps][0]}'
+
+
+def _rf_seed_metrics(exp, meta, isfn=True):
+    """Per seed: 5-fold means of AUC / sens / spec (all test slides, or Control/DM/FAP when isfn=False),
+    plus the pooled iSFN sensitivity. None if a seed is missing."""
+    rows = []
+    for seed in AB_SEEDS:
+        d = os.path.join(RESULTS, f'{exp}_s{seed}')
+        if not os.path.exists(os.path.join(d, 'summary.csv')):
+            return None
+        folds, isfn_ok = [], []
+        for k in range(5):
+            with open(os.path.join(d, f'split_{k}_results.pkl'), 'rb') as f:
+                g = pd.DataFrame([dict(slide=s, y=int(v['label']), p=float(v['prob'][0][1])) for s, v in pickle.load(f).items()])
+            g = g.join(meta[['label']], on='slide')
+            g['ok'] = (g.p >= 0.5).astype(int) == g.y
+            isfn_ok += g[g.label == 'iSFN'].ok.tolist()
+            if not isfn:
+                g = g[g.label != 'iSFN']
+            folds.append(dict(fold=k, auc=roc_auc_score(g.y, g.p), spec=g[g.label == 'Control'].ok.mean(),
+                              sens=g[g.y == 1].ok.mean()))
+        f = pd.DataFrame(folds)
+        rows.append(dict(seed=seed, **f.drop(columns='fold').mean(), isfn=np.mean(isfn_ok) if isfn_ok else np.nan,
+                         folds=f.set_index('fold')))
+    return rows
+
+
+def fig_rf_ladder(meta, path):
+    """Ladder A-E on the random folds next to the same ladder on the rebalanced folds (387 Control/DM/FAP slides)."""
+    reb = dict(AB_RUNGS)
+    series = [('random folds', RF_LADDER, AB_MEAN, 0.1), ('rebalanced folds (earlier report)', {r: v[0] for r, v in reb.items()}, MUTED, -0.1)]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.4))
+    for name, runs, col, off in series:
+        per = {r: _rf_seed_metrics(exp, meta, isfn=False) for r, exp in runs.items()}
+        for ax, m in zip(axes, ['auc', 'spec', 'sens']):
+            means = []
+            for i, r in enumerate(runs):
+                v = [s[m] for s in per[r]]
+                ax.scatter(np.full(len(v), i + off), v, s=12, color=col, alpha=0.45, lw=0, zorder=3)
+                means.append(np.mean(v))
+            ax.plot(np.arange(len(runs)) + off, means, color=col, marker='o', ms=5, lw=1.4, zorder=4)
+            if col == AB_MEAN:
+                for i, mv in enumerate(means):
+                    ax.annotate(f'{mv:.3f}', (i + off, mv), textcoords='offset points', xytext=(6, 4), ha='left', fontsize=7.5, color=INK2)
+    for ax, title in zip(axes, ['AUC', 'Specificity (Control)', 'Sensitivity (DM + FAP)']):
+        ax.set_xticks(range(5), [AB_SHORT[r] for r in 'ABCDE'], fontsize=8)
+        ax.set_xlim(-0.45, 4.6)
+        ax.set_title(title)
+        ax.grid(axis='x', visible=False)
+    legend_below(axes[0], [Line2D([], [], color=AB_MEAN, marker='o', label='random folds, mean of 3 seeds'),
+                           Line2D([], [], color=MUTED, marker='o', label='rebalanced folds, mean of 3 seeds'),
+                           Line2D([], [], color=MUTED, marker='o', ls='', alpha=0.5, label='one seed (5-fold mean)')])
+    note(fig, '128 px, B = 8, Control/DM/FAP test slides only (387). The two fold schemes have different test sets, so their levels are not paired.')
+    save(fig, path)
+
+
+def fig_rf_variants(meta, path):
+    """Normalization variants at each patch size where they were run: seed dots and the 3-seed mean, all 433 slides."""
+    sizes = [ps for ps in (128, 32) if _rf_seed_metrics(_rf_exp('D', ps), meta) is not None]
+    data = {}
+    for ps in sizes:
+        for v in RF_VARIANTS:
+            r = _rf_seed_metrics(_rf_exp(v, ps), meta)
+            if r is not None:
+                data[(v, ps)] = r
+    vs = list(RF_VARIANTS)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8.2))
+    offs = {ps: (j - (len(sizes) - 1) / 2) * 0.24 for j, ps in enumerate(sizes)}
+    for ax, (m, title) in zip(axes.flat, [('auc', 'AUC'), ('spec', 'Specificity (Control)'),
+                                          ('sens', 'Sensitivity (DM + FAP + iSFN)'), ('isfn', 'Sensitivity, iSFN (pooled, 46 slides)')]):
+        for ps in sizes:
+            col = RF_SIZES[ps][1]
+            ref = np.mean([s[m] for s in data[('D', ps)]])
+            ax.axhline(ref, color=col, lw=0.8, ls='--', alpha=0.7, zorder=1)
+            xs, means = [], []
+            for i, v in enumerate(vs):
+                if (v, ps) not in data:
+                    continue
+                vals = [s[m] for s in data[(v, ps)]]
+                ax.scatter(np.full(len(vals), i + offs[ps]), vals, s=14, color=col, alpha=0.45, lw=0, zorder=3)
+                xs.append(i + offs[ps]); means.append(np.mean(vals))
+                ax.scatter([i + offs[ps]], [np.mean(vals)], s=34, color=col, zorder=4, edgecolor='white', lw=0.6)
+                left = offs[ps] < 0 or len(sizes) == 1
+                ax.annotate(f'{np.mean(vals):.3f}', (i + offs[ps], np.mean(vals)), textcoords='offset points',
+                            xytext=(-6 if left else 6, 0), ha='right' if left else 'left', va='center', fontsize=6.8, color=INK2,
+                            bbox=dict(fc='#fcfcfb', ec='none', pad=0.6), zorder=5)
+        ax.set_xticks(range(len(vs)), [RF_VARIANTS[v][1] for v in vs], fontsize=8)
+        ax.set_xlim(-0.5, len(vs) - 0.5)
+        allv = [s[m] for r in data.values() for s in r]
+        ax.set_ylim(min(allv) - 0.035, max(allv) + 0.02)
+        ax.set_title(title)
+        ax.grid(axis='x', visible=False)
+    legend_below(axes[1, 0], [Line2D([], [], color=RF_SIZES[ps][1], marker='o', ls='', label=f'{ps} px, mean of 3 seeds') for ps in sizes]
+                 + [Line2D([], [], color=MUTED, marker='o', ls='', alpha=0.5, label='one seed (5-fold mean)'),
+                    Line2D([], [], color=MUTED, ls='--', label='D (no correction) at that size')])
+    note(fig, 'Random folds, all 433 test slides. All variants use the same patch coordinates and the mask outside ROI + 20 px; they differ only in '
+              'pixel values (E, W, G, Gk, Bt)\nor in the features (F). The y-axes do not start at 0.')
+    save(fig, path)
+
+
+def fig_rf_paired(meta, path):
+    """Per-fold difference to D at the same patch size (seed-averaged), AUC and specificity, shared y-axis per metric."""
+    sizes = [ps for ps in (128, 32) if _rf_seed_metrics(_rf_exp('D', ps), meta) is not None]
+    vs = [v for v in RF_VARIANTS if v != 'D']
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.6))
+    offs = {ps: (j - (len(sizes) - 1) / 2) * 0.3 for j, ps in enumerate(sizes)}
+    for ps in sizes:
+        ref = pd.concat([s['folds'] for s in _rf_seed_metrics(_rf_exp('D', ps), meta)]).groupby(level=0).mean()
+        for i, v in enumerate(vs):
+            r = _rf_seed_metrics(_rf_exp(v, ps), meta)
+            if r is None:
+                continue
+            f = pd.concat([s['folds'] for s in r]).groupby(level=0).mean()
+            for ax, m in zip(axes, ['auc', 'spec', 'sens']):
+                d = (f[m] - ref[m]).values
+                x = i + offs[ps] + np.linspace(-0.09, 0.09, len(d))
+                ax.scatter(x, d, s=14, color=RF_SIZES[ps][1], alpha=0.6, lw=0, zorder=3)
+                ax.plot([i + offs[ps] - 0.12, i + offs[ps] + 0.12], [d.mean()] * 2, color=RF_SIZES[ps][1], lw=2.2, zorder=4)
+    for ax, title in zip(axes, ['Δ AUC vs. D', 'Δ specificity vs. D', 'Δ sensitivity vs. D']):
+        ax.axhline(0, color=AXIS, lw=1, zorder=1)
+        ax.set_xticks(range(len(vs)), [RF_VARIANTS[v][1] for v in vs], fontsize=8)
+        ax.set_title(title)
+        ax.grid(axis='x', visible=False)
+    legend_below(axes[0], [Line2D([], [], color=RF_SIZES[ps][1], lw=2.2, label=f'{ps} px, mean over folds') for ps in sizes]
+                 + [Line2D([], [], color=MUTED, marker='o', ls='', alpha=0.6, label='one test fold (mean of 3 seeds)')])
+    note(fig, 'Random folds, all 433 test slides. Each variant is compared with D (mask, no intensity correction) at the same patch size.')
+    save(fig, path)
+
+
+def fig_rf_patch_sizes(meta, path):
+    """D vs. E at 128 / 32 / 16 px on the random folds, all 433 slides."""
+    sizes = [128, 32, 16]
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4.3))
+    allr = {(v, ps): _rf_seed_metrics(_rf_exp(v, ps), meta) for v in 'DE' for ps in sizes}
+    for ax, (m, title) in zip(axes, [('auc', 'AUC'), ('spec', 'Specificity (Control)'),
+                                     ('sens', 'Sensitivity (DM + FAP + iSFN)'), ('isfn', 'Sensitivity, iSFN (pooled, 46 slides)')]):
+        for j, v in enumerate('DE'):
+            off = (j - 0.5) * 0.22
+            means = []
+            for i, ps in enumerate(sizes):
+                vals = [s[m] for s in allr[(v, ps)]]
+                ax.scatter(np.full(len(vals), i + off), vals, s=14, color=AB_DE_COLORS[v], alpha=0.45, zorder=3, lw=0)
+                means.append(np.mean(vals))
+            ax.plot(np.arange(len(sizes)) + off, means, color=AB_DE_COLORS[v], marker='o', ms=6, lw=1.6, zorder=4)
+            for i, mv in enumerate(means):
+                ax.annotate(f'{mv:.3f}', (i + off, mv), textcoords='offset points', xytext=(-7 if v == 'D' else 7, 0),
+                            ha='right' if v == 'D' else 'left', va='center', fontsize=7.5, color=INK2,
+                            bbox=dict(fc='#fcfcfb', ec='none', pad=0.6), zorder=5)
+        allv = [s[m] for r in allr.values() for s in r]
+        ax.set_ylim(min(allv) - 0.03, max(allv) + 0.03)
+        ax.set_xticks(range(len(sizes)), [f'{ps} px' for ps in sizes])
+        ax.set_xlim(-0.6, len(sizes) - 0.4)
+        ax.set_title(title)
+        ax.grid(axis='x', visible=False)
+    legend_below(axes[0], [Line2D([], [], color=AB_DE_COLORS[k], marker='o', label=AB_DE_LABELS[k] + ' (mean of 3 seeds)') for k in 'DE']
+                 + [Line2D([], [], color=MUTED, marker='o', ls='', alpha=0.6, label='one seed (5-fold mean)')])
+    note(fig, 'Random folds, all 433 test slides, buffer 20 px, ≥ 10% ROI + buffer. B = 8 / 32 / 64 for 128 / 32 / 16 px.')
+    save(fig, path)
+
+
+def norm_rf_figures(shared):
+    meta = pd.read_csv(os.path.join(os.path.dirname(RESULTS), 'dataset_csv', 'ienf_isfn_4sub.csv')).set_index('slide_id')
+    fig_rf_ladder(meta, os.path.join(shared, 'ienf_norm_rf_ladder.png'))
+    fig_rf_variants(meta, os.path.join(shared, 'ienf_norm_rf_variants.png'))
+    fig_rf_paired(meta, os.path.join(shared, 'ienf_norm_rf_paired.png'))
+    fig_rf_patch_sizes(meta, os.path.join(shared, 'ienf_norm_rf_patch_sizes.png'))
+
+
 # ----------------------------------------------------------------------------- main
 def main():
+    if '--only' in sys.argv and sys.argv[sys.argv.index('--only') + 1] == 'ienf_norm_rf':
+        norm_rf_figures(os.path.join(RESULTS, 'figures'))
+        return
     if '--only' in sys.argv and sys.argv[sys.argv.index('--only') + 1] == 'ienf':
         ienf_figures(os.path.join(RESULTS, 'figures'))
         return

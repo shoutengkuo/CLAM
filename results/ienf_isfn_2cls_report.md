@@ -1,5 +1,7 @@
 # CLAM on IENF Skin Biopsies with iSFN (Normal vs. Disease, UNI): New Preprocessing and Patch Sizes 128 / 64 / 32 / 16
 
+> **Update (2026-11-07).** The folds here were rebalanced using earlier test results; see [ienf_ablation_report.md](ienf_ablation_report.md) and [ienf_norm_random_folds_report.md](ienf_norm_random_folds_report.md) for the ablation on the same folds and on random folds. On random folds, mask-only images at 32 px (no intensity normalization) reach AUC 0.902 (3 seeds); the normalization used in this report lowers it to 0.848.
+
 **Runs compared** (our own runs, trained on 2026-11-04, 16:09–20:39, with `run_ienf_isfn_2cls.sh`):
 
 | Name | Experiment code | Patch size | B | Feature folder |
