@@ -30,20 +30,23 @@ All 433 test slides, random folds. Mean ± SD over 3 seeds of the 5-fold mean:
 | Specificity (Control) | 0.761 ± 0.043 | 0.710 ± 0.073 | 0.774 ± 0.010 | 0.712 ± 0.020 | **0.801 ± 0.038** | 0.766 ± 0.013 | 0.795 ± 0.073 |
 | Sensitivity (all disease) | 0.853 ± 0.040 | 0.783 ± 0.019 | **0.865 ± 0.021** | 0.792 ± 0.012 | 0.806 ± 0.019 | 0.843 ± 0.010 | 0.844 ± 0.025 |
 | Balanced accuracy | 0.807 | 0.747 | 0.819 | 0.752 | 0.804 | 0.805 | **0.820** |
+| F1 (disease) | 0.849 ± 0.028 | 0.794 ± 0.013 | **0.859 ± 0.012** | 0.798 ± 0.003 | 0.830 ± 0.001 | 0.845 ± 0.003 | 0.853 ± 0.015 |
+| F1 (macro) | 0.806 ± 0.034 | 0.739 ± 0.030 | **0.819 ± 0.013** | 0.748 ± 0.005 | 0.797 ± 0.006 | 0.802 ± 0.004 | 0.817 ± 0.026 |
 | iSFN sensitivity (46 slides) | 0.906 | 0.833 | **0.920** | 0.826 | 0.906 | 0.877 | 0.906 |
 | AUC vs. D, pooled (95% CI) | – | **−0.057** (−0.092 to −0.025) | +0.004 (−0.006 to +0.014) | **−0.046** (−0.079 to −0.015) | −0.017 (−0.042 to +0.007) | −0.004 (−0.016 to +0.007) | +0.003 (−0.007 to +0.012) |
 
 - **The between-image step causes the loss; the within-image step does not.**
   - At 32 px, between-only (G) loses AUC 0.048 against D. It is lower in 4 of 5 folds and all 3 seeds, and the bootstrap CI excludes 0. This is almost the whole loss of the full normalization (E: −0.054, lower in all 5 folds and all 3 seeds).
-  - Within-only (W) is equal to D: AUC +0.002, specificity +0.012, sensitivity +0.012, none consistent across folds.
+  - Within-only (W) is equal to D: AUC +0.002, specificity +0.012, sensitivity +0.012, macro F1 +0.014, none consistent across folds.
 - **Most of the between-image loss comes from rescaling the green (nerve-fibre) channel.**
   - Between-image scaling of only red and blue (Gk) loses 0.018 AUC, against 0.048 for G.
   - The raw ROI median of green alone separates disease from Control with AUC 0.675; in batch 2 it reaches 0.822 (Section 6). The between-image step sets this median to the same value in every image, so it removes that information.
 - **No normalization improves clearly on no correction.**
   - The three variants close to D at 32 px are W, Bt and F. Their AUC is within ±0.004 of D, and all three bootstrap CIs include 0.
-  - **W** is among the most stable: its seed SD is 0.003 (as for Bt) against D's 0.013, and it has the highest sensitivity (0.865) and iSFN sensitivity (0.920). It changes only 52 of the 433 task slides; the others have identical features.
+  - **W** is among the most stable: its seed SD is 0.003 (as for Bt) against D's 0.013, and it has the highest sensitivity (0.865), iSFN sensitivity (0.920) and F1 (disease 0.859, macro 0.819). It changes only 52 of the 433 task slides; the others have identical features.
   - **F** has the highest specificity in batch 2 (0.852 vs. 0.788, higher in all 5 folds and all 3 seeds; p = 0.0625, the smallest possible with 5 folds). But it is transductive: test slides contribute to the alignment statistics.
   - At 128 px no variant differs from D beyond seed noise (all AUC differences ≤ 0.010, all bootstrap CIs include 0).
+- **Control is the weaker class in every variant** (F1 0.68–0.78 vs. 0.79–0.86 for disease; Section 3.3). Between-image scaling lowers Control F1 most (E: −0.079), mainly because more disease slides are called Control.
 - **On random folds, 32 px and 16 px beat 128 px clearly** (D: 0.902 and 0.908 vs. 0.862).
   - The AUC gain is +0.040 and +0.046. It is in all 5 folds and all 3 seeds, and both bootstrap CIs exclude 0.
   - On the rebalanced folds the gain was only +0.012 / +0.014.
@@ -161,6 +164,8 @@ CUDA_VISIBLE_DEVICES=0 python main.py \
 - **Paired differences** are over 15 seed × fold pairs. "Folds up" and "seeds up" count the folds (seed-averaged) and the seeds (fold-averaged) in which the variant is higher.
   - The Wilcoxon test uses the 5 seed-averaged fold differences, because seeds share test sets. The smallest possible p is 0.0625, so **no single comparison can reach p < 0.05**. The bootstrap CI is the stronger evidence here.
 - **Pooled, seed-ensembled:** P(disease) averaged over the 3 seeds per slide, then all slides pooled. The bootstrap resamples patients (2000 resamples) to give a CI for the pooled AUC difference.
+- **F1:** F1 (disease) is the F1 of class 1. F1 (macro) is the mean of the Control and disease F1. Both are computed per fold and averaged like the other metrics.
+- **Per-class metrics** (Section 3.3): precision, recall and F1 of each class. Recall of disease = sensitivity, recall of Control = specificity, precision of disease = PPV, precision of Control = NPV.
 - **iSFN sensitivity:** the pooled share of the 46 iSFN slides detected (8–10 per fold).
 - **Slide sets:** all 433 slides for the variants. For the ladder A–E, the 387 Control/DM/FAP slides, so that A (no iSFN) is comparable.
 - All recomputed fold AUCs and accuracies (285 folds) match `summary.csv`.
@@ -185,14 +190,14 @@ CUDA_VISIBLE_DEVICES=0 python main.py \
 
 Difference to D, paired over 15 seed × fold pairs:
 
-| 32 px | AUC | Folds up | Seeds up | p | Specificity | Folds up | Sensitivity | Folds up |
-|---|---|---|---|---|---|---|---|---|
-| E − D | **−0.054** | 0/5 | 0/3 | 0.0625 | −0.051 | 2/5 | **−0.070** | 0/5 |
-| W − D | +0.002 | 2/5 | 2/3 | 1.00 | +0.012 | 2/5 | +0.012 | 2/5 |
-| G − D | **−0.048** | 1/5 | 0/3 | 0.13 | −0.050 | 1/5 | −0.061 | 1/5 |
-| Gk − D | −0.018 | 1/5 | 1/3 | 0.19 | +0.040 | 3/5 | −0.047 | 1/5 |
-| Bt − D | −0.003 | 1/5 | 1/3 | 0.63 | +0.005 | 2/5 | −0.010 | 1/5 |
-| F − D | +0.003 | 3/5 | 2/3 | 0.44 | +0.034 | 3/5 | −0.009 | 1/5 |
+| 32 px | AUC | Folds up | Seeds up | p | Specificity | Folds up | Sensitivity | Folds up | F1 (macro) | Folds up |
+|---|---|---|---|---|---|---|---|---|---|---|
+| E − D | **−0.054** | 0/5 | 0/3 | 0.0625 | −0.051 | 2/5 | **−0.070** | 0/5 | −0.067 | 1/5 |
+| W − D | +0.002 | 2/5 | 2/3 | 1.00 | +0.012 | 2/5 | +0.012 | 2/5 | +0.014 | 3/5 |
+| G − D | **−0.048** | 1/5 | 0/3 | 0.13 | −0.050 | 1/5 | −0.061 | 1/5 | −0.058 | 1/5 |
+| Gk − D | −0.018 | 1/5 | 1/3 | 0.19 | +0.040 | 3/5 | −0.047 | 1/5 | −0.009 | 3/5 |
+| Bt − D | −0.003 | 1/5 | 1/3 | 0.63 | +0.005 | 2/5 | −0.010 | 1/5 | −0.003 | 2/5 |
+| F − D | +0.003 | 3/5 | 2/3 | 0.44 | +0.034 | 3/5 | −0.009 | 1/5 | +0.011 | 3/5 |
 
 F's batch-2 specificity is higher than D's in all 5 folds and all 3 seeds: +0.064, p = 0.0625.
 
@@ -216,6 +221,8 @@ Observations:
 | Specificity (Control) | **0.767 ± 0.023** | 0.735 ± 0.041 | 0.752 ± 0.023 | 0.734 ± 0.007 | 0.730 ± 0.024 | 0.750 ± 0.042 | 0.711 ± 0.032 |
 | Sensitivity (all disease) | 0.801 ± 0.017 | 0.797 ± 0.026 | 0.809 ± 0.033 | 0.783 ± 0.021 | 0.818 ± 0.031 | 0.799 ± 0.044 | **0.823 ± 0.016** |
 | Balanced accuracy | **0.784** | 0.766 | 0.781 | 0.759 | 0.774 | 0.775 | 0.767 |
+| F1 (disease) | 0.818 ± 0.012 | 0.808 ± 0.007 | **0.819 ± 0.022** | 0.799 ± 0.012 | 0.817 ± 0.013 | 0.811 ± 0.019 | 0.815 ± 0.012 |
+| F1 (macro) | **0.778 ± 0.012** | 0.760 ± 0.008 | 0.777 ± 0.020 | 0.752 ± 0.009 | 0.770 ± 0.008 | 0.768 ± 0.012 | 0.764 ± 0.016 |
 | Spec. batch 1 | **0.743** | 0.713 | 0.710 | 0.719 | 0.726 | 0.722 | 0.668 |
 | Spec. batch 2 | 0.820 | 0.788 | **0.846** | 0.773 | 0.743 | 0.813 | 0.809 |
 | iSFN sensitivity | 0.862 | 0.833 | 0.870 | 0.826 | **0.906** | 0.848 | 0.848 |
@@ -232,6 +239,40 @@ Observations:
 
 *Figure 2. Per-fold difference to D at the same patch size (each dot: one test fold, mean of 3 seeds; bar: mean over folds).*
 
+### 3.3 Per-class performance
+
+Class 0 = Control (172 slides), class 1 = disease (261 slides: DM, FAP, iSFN). Fold mean, mean ± SD over 3 seeds; threshold 0.5. Recall of Control = specificity, precision of Control = NPV, recall of disease = sensitivity.
+
+| 32 px, all 433 slides | D | E | W | G | Gk | Bt | F |
+|---|---|---|---|---|---|---|---|
+| Control precision (NPV) | 0.778 ± 0.048 | 0.688 ± 0.023 | **0.794 ± 0.027** | 0.701 ± 0.013 | 0.743 ± 0.009 | 0.765 ± 0.007 | 0.775 ± 0.020 |
+| Control recall (specificity) | 0.761 ± 0.043 | 0.710 ± 0.073 | 0.774 ± 0.010 | 0.712 ± 0.020 | **0.801 ± 0.038** | 0.766 ± 0.013 | 0.795 ± 0.073 |
+| Control F1 | 0.763 ± 0.042 | 0.683 ± 0.049 | **0.780 ± 0.015** | 0.698 ± 0.011 | 0.764 ± 0.012 | 0.760 ± 0.008 | **0.780 ± 0.039** |
+| Disease precision (PPV) | 0.851 ± 0.023 | 0.817 ± 0.033 | 0.856 ± 0.007 | 0.813 ± 0.005 | **0.867 ± 0.022** | 0.852 ± 0.006 | **0.867 ± 0.036** |
+| Disease recall (sensitivity) | 0.853 ± 0.040 | 0.783 ± 0.019 | **0.865 ± 0.021** | 0.792 ± 0.012 | 0.806 ± 0.019 | 0.843 ± 0.010 | 0.844 ± 0.025 |
+| Disease F1 | 0.849 ± 0.028 | 0.794 ± 0.013 | **0.859 ± 0.012** | 0.798 ± 0.003 | 0.830 ± 0.001 | 0.845 ± 0.003 | 0.853 ± 0.015 |
+| Macro precision | 0.815 | 0.753 | **0.825** | 0.757 | 0.805 | 0.808 | 0.821 |
+| Macro recall (= balanced accuracy) | 0.807 | 0.747 | 0.819 | 0.752 | 0.804 | 0.805 | **0.820** |
+| Macro F1 | 0.806 | 0.739 | **0.819** | 0.748 | 0.797 | 0.802 | 0.817 |
+
+Per-class F1 difference to D at 32 px, paired over 15 seed × fold pairs (folds up, seeds up):
+
+| 32 px | Control F1 | Disease F1 | Macro F1 | Control precision (NPV) |
+|---|---|---|---|---|
+| E − D | −0.079 (1/5, 0/3) | −0.055 (1/5, 0/3) | −0.067 (1/5, 0/3) | **−0.091 (0/5, 0/3)**, p = 0.0625 |
+| W − D | +0.017 (3/5, 2/3) | +0.010 (3/5, 2/3) | +0.014 (3/5, 2/3) | +0.016 (3/5, 2/3) |
+| G − D | −0.065 (1/5, 0/3) | −0.051 (1/5, 0/3) | −0.058 (1/5, 0/3) | −0.077 (1/5, 0/3) |
+| Gk − D | +0.001 (3/5, 2/3) | −0.019 (2/5, 1/3) | −0.009 (3/5, 1/3) | −0.035 (1/5, 1/3) |
+| Bt − D | −0.003 (2/5, 2/3) | −0.004 (2/5, 2/3) | −0.003 (2/5, 2/3) | −0.013 (1/5, 1/3) |
+| F − D | +0.017 (3/5, 1/3) | +0.004 (3/5, 1/3) | +0.011 (3/5, 1/3) | −0.003 (1/5, 1/3) |
+
+Observations:
+- **Control is the weaker class in every variant.** Control F1 is 0.68–0.78 and disease F1 is 0.79–0.86. In D, Control precision (0.778) and recall (0.761) are close, so both error types contribute: Controls called disease, and disease slides called Control.
+- **Between-image scaling hurts Control F1 most, through Control precision.** Under E, Control F1 drops by 0.079 and disease F1 by 0.055. The largest single change is Control precision (NPV): −0.091, lower in all 5 folds and all 3 seeds. So more disease slides are predicted Control, the sensitivity loss of Section 3.1. G shows the same pattern (NPV −0.077).
+- **Gk shifts the operating point rather than improving it.** It has the highest Control recall (0.801), but lower Control precision (0.743) and disease recall (0.806). Its Control F1 equals D's (+0.001).
+- **W has the highest F1 for both classes** (Control 0.780, tied with F; disease 0.859), but its differences to D are within seed noise (3 of 5 folds up).
+- **At 128 px** Control F1 is 0.705–0.738 and disease F1 0.799–0.819 across the variants. Going from 128 px to 32 px (D) raises Control precision by 0.051 (all 5 folds, all 3 seeds) and disease F1 by 0.031 (all 5 folds, all 3 seeds): small patches gain mainly by calling fewer disease slides Control.
+
 ## 4. Patch size and full normalization (128 / 32 / 16 px)
 
 ![D vs. E by patch size](figures/ienf_norm_rf_patch_sizes.png)
@@ -244,20 +285,22 @@ Observations:
 | Specificity | **0.767 ± 0.023** | 0.735 ± 0.041 | 0.761 ± 0.043 | 0.710 ± 0.073 | 0.731 ± 0.017 | 0.755 ± 0.030 |
 | Sensitivity | 0.801 ± 0.017 | 0.797 ± 0.026 | **0.853 ± 0.040** | 0.783 ± 0.019 | 0.852 ± 0.010 | 0.780 ± 0.026 |
 | Balanced accuracy | 0.784 | 0.766 | **0.807** | 0.747 | 0.792 | 0.768 |
+| F1 (disease) | 0.818 ± 0.012 | 0.808 ± 0.007 | **0.849 ± 0.028** | 0.794 ± 0.013 | 0.840 ± 0.009 | 0.803 ± 0.020 |
+| F1 (macro) | 0.778 ± 0.012 | 0.760 ± 0.008 | **0.806 ± 0.034** | 0.739 ± 0.030 | 0.791 ± 0.014 | 0.762 ± 0.022 |
 | iSFN sensitivity | 0.862 | 0.833 | **0.906** | 0.833 | 0.884 | 0.862 |
 
-| Comparison | AUC | Folds up | Seeds up | Pooled AUC difference (95% CI) |
-|---|---|---|---|---|
-| E − D, 128 px | −0.008 | 3/5 | 1/3 | −0.009 (−0.047 to +0.029) |
-| E − D, 32 px | **−0.054** | 0/5 | 0/3 | −0.057 (−0.092 to −0.025) |
-| E − D, 16 px | **−0.052** | 0/5 | 0/3 | −0.043 (−0.073 to −0.014) |
-| D 32 px − D 128 px | **+0.040** | 5/5 | 3/3 | +0.042 (+0.016 to +0.070) |
-| D 16 px − D 128 px | **+0.046** | 5/5 | 3/3 | +0.046 (+0.015 to +0.080) |
+| Comparison | AUC | Folds up | Seeds up | Pooled AUC difference (95% CI) | F1 (macro) (folds up, seeds up) |
+|---|---|---|---|---|---|
+| E − D, 128 px | −0.008 | 3/5 | 1/3 | −0.009 (−0.047 to +0.029) | −0.018 (1/5, 0/3) |
+| E − D, 32 px | **−0.054** | 0/5 | 0/3 | −0.057 (−0.092 to −0.025) | −0.067 (1/5, 0/3) |
+| E − D, 16 px | **−0.052** | 0/5 | 0/3 | −0.043 (−0.073 to −0.014) | −0.028 (2/5, 0/3) |
+| D 32 px − D 128 px | **+0.040** | 5/5 | 3/3 | +0.042 (+0.016 to +0.070) | +0.028 (5/5, 3/3) |
+| D 16 px − D 128 px | **+0.046** | 5/5 | 3/3 | +0.046 (+0.015 to +0.080) | +0.013 (2/5, 2/3) |
 
 Observations:
 - **Small patches are clearly better on random folds.** This is the most consistent result in this report: every fold, every seed, and a bootstrap CI above 0.
   - The gain comes from sensitivity (+0.05); specificity does not change at 32 px (−0.006) and drops at 16 px (−0.036).
-- **16 px is not better than 32 px** on balanced accuracy, specificity or iSFN sensitivity. It costs about 3× the extraction time. 32 px remains the better choice.
+- **16 px is not better than 32 px** on balanced accuracy, specificity, macro F1 (0.791 vs. 0.806) or iSFN sensitivity. It costs about 3× the extraction time. 32 px remains the better choice.
 - **Full normalization loses sensitivity at 32 px and 16 px** (−0.070 and −0.072, lower in all 5 folds at both sizes). At 16 px its specificity is slightly higher than D's (+0.024), so part of that loss is a shift of the operating point. But the AUC loss is equally consistent.
 
 ## 5. The ladder A–E on random folds vs. rebalanced folds
@@ -274,16 +317,18 @@ Observations:
 | Specificity, rebalanced folds (earlier) | 0.726 ± 0.006 | 0.722 ± 0.010 | 0.755 ± 0.042 | **0.788 ± 0.013** | 0.692 ± 0.017 |
 | Sensitivity, random folds | 0.787 ± 0.032 | 0.787 ± 0.049 | **0.804 ± 0.036** | 0.788 ± 0.022 | 0.789 ± 0.027 |
 | Balanced accuracy, random folds | 0.764 | 0.745 | 0.769 | **0.778** | 0.762 |
+| F1 (disease), random folds | 0.787 ± 0.003 | 0.769 ± 0.038 | 0.796 ± 0.017 | **0.797 ± 0.016** | 0.790 ± 0.006 |
+| F1 (macro), random folds | 0.760 ± 0.014 | 0.740 ± 0.030 | 0.768 ± 0.015 | **0.774 ± 0.015** | 0.758 ± 0.009 |
 
 Step effects on random folds (paired over seed × fold; pooled AUC difference with patient bootstrap):
 
-| Step | AUC | Folds up | Seeds up | Specificity | Spec. batch 2 | Pooled AUC difference (95% CI) |
-|---|---|---|---|---|---|---|
-| A → B (+ iSFN) | −0.009 | 2/5 | 0/3 | −0.039 | −0.031 | −0.012 (−0.034 to +0.009) |
-| B → C (buffer 20, ≥ 10%) | +0.010 | 4/5 | 3/3 | +0.033 | +0.019 | **+0.024 (+0.004 to +0.044)** |
-| C → D (+ mask) | −0.010 | 1/5 | 0/3 | +0.032 | **+0.100** (4/5, 3/3) | −0.023 (−0.051 to +0.003) |
-| D → E (+ normalization) | −0.001 | 3/5 | 1/3 | −0.032 | −0.032 | −0.001 (−0.042 to +0.040) |
-| A → D (all changes but normalization) | −0.009 | 1/5 | 0/3 | +0.027 | +0.088 | −0.011 (−0.044 to +0.020) |
+| Step | AUC | Folds up | Seeds up | Specificity | Spec. batch 2 | F1 (macro) (folds up) | Pooled AUC difference (95% CI) |
+|---|---|---|---|---|---|---|---|
+| A → B (+ iSFN) | −0.009 | 2/5 | 0/3 | −0.039 | −0.031 | −0.020 (1/5) | −0.012 (−0.034 to +0.009) |
+| B → C (buffer 20, ≥ 10%) | +0.010 | 4/5 | 3/3 | +0.033 | +0.019 | +0.028 (4/5) | **+0.024 (+0.004 to +0.044)** |
+| C → D (+ mask) | −0.010 | 1/5 | 0/3 | +0.032 | **+0.100** (4/5, 3/3) | +0.006 (2/5) | −0.023 (−0.051 to +0.003) |
+| D → E (+ normalization) | −0.001 | 3/5 | 1/3 | −0.032 | −0.032 | −0.016 (1/5) | −0.001 (−0.042 to +0.040) |
+| A → D (all changes but normalization) | −0.009 | 1/5 | 0/3 | +0.027 | +0.088 | +0.014 (3/5) | −0.011 (−0.044 to +0.020) |
 
 Observations:
 - **What holds on both fold schemes:**
@@ -380,8 +425,8 @@ A linear probe (logistic regression on mean-pooled slide features, patient-group
 5. **Some earlier 128 px findings were fold-specific.** On the rebalanced folds, the mask raised AUC and normalization cost 0.096 specificity. On random folds, neither is clear at 128 px.
    - The findings at 32 px and 16 px hold on both fold schemes: normalization lowers AUC by 0.03–0.05, and small patches are better.
 6. **Recommended setup:** mask-only images (D) or within-only images (W), 32 px, B = 32. On random folds, all 433 slides:
-   - D: AUC 0.902, balanced accuracy 0.807, iSFN sensitivity 0.906;
-   - W: AUC 0.904, balanced accuracy 0.819, iSFN sensitivity 0.920.
+   - D: AUC 0.902, balanced accuracy 0.807, macro F1 0.806, iSFN sensitivity 0.906;
+   - W: AUC 0.904, balanced accuracy 0.819, macro F1 0.819, iSFN sensitivity 0.920.
 
 **Limitations**
 - **One random split** (seed 2026). Its fold 1 has an unusual number of hard patients. Fold-to-fold differences are large (AUC 0.86–0.94 for D at 32 px), so a second split seed would make the absolute numbers firmer.
