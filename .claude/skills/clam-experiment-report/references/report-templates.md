@@ -26,7 +26,8 @@ Contents:
 earlier run it is otherwise identical to.>
 
 | Metric (test set, <k> folds) | Mean ± SD | Min | Max |   <- AUC and Accuracy in bold; then bACC,
-                                                                Sensitivity, Specificity, Precision, F1
+                                                                Sensitivity, Specificity, Precision,
+                                                                F1 (pos.), F1 (macro)
 <One line: SD definition (ddof = 1), positive class, argmax threshold.>
 
 ## 2. Data
@@ -51,12 +52,19 @@ change (e.g. embed_dim -> the first layer goes from Linear(1024, 512) to Linear(
 
 ## 5. Per-Fold Test Results
 Per-fold table (Fold | Epochs run | Best val-loss epoch | Val AUC | Val Acc | **Test AUC** | **Test Acc**
-| Sens. | Spec. | F1) with Mean and SD rows. Note that the epochs come from TensorBoard and are 0-indexed.
+| Sens. | Spec. | F1 (pos.) | F1 (macro)) with Mean and SD rows. Note that the epochs come from TensorBoard and are 0-indexed.
 [Figure: ROC + PR] [Figure: per-fold metric strip]
 ### Pooled confusion matrix (all <k> test folds, <n> slide predictions)
 2×2 table + the overlap caveat + pooled AUC vs. mean per-fold AUC.
-### Sensitivity by <subtype> (only if subtype labels exist)
-Table: detected / total (pooled), pooled rate, per-fold mean ± SD, and the false-positive rate on negatives.
+### Per-class performance
+Table: Class | Support (pooled) | Precision | Recall | F1 (mean ± SD over folds) | Pooled precision |
+Pooled recall | Pooled F1, one row per class plus Macro avg and Weighted avg rows (from the script's
+"Per-class performance" table). One sentence mapping the binary terms (recall of class 1 = sensitivity,
+recall of class 0 = specificity, precision of class 0 = NPV). 1–2 bullets: which class is weaker and
+whether precision or recall drives it.
+### Performance by <subtype> (only if subtype labels exist)
+Table: Subtype | Class | n | Correct | Recall (pooled) | Recall per fold (mean ± SD) | Mean P(class 1) |
+AUC vs. other class. The negative subtype's recall is its specificity.
 [Figure: confusion matrix + subtype bars]
 
 ## 6. Training Time
@@ -80,7 +88,10 @@ One table, one column per run, this run's column in bold. Do not repeat the othe
 [Figure: grouped metric bars] [Figure: per-fold AUC by run]
 ### Paired difference of <this run> from each other run (same splits in every fold)
 Table: Metric | A − B | Folds A better | p | ... (Wilcoxon note: exact test, smallest possible p).
-### Sensitivity by <subtype> (pooled over all test folds)
+### Per-class performance by run
+Table: Class | Precision, Recall, F1 for each run (pooled; F1 also mean ± SD over folds) | paired
+F1 difference with folds better and p.
+### Performance by <subtype> (pooled over all test folds)
 [Figure: subtype bars by run]
 ### Interpretation
 Bold-lead bullets: this run vs. each other run (significant or trend), where the gain comes from, and
@@ -112,9 +123,11 @@ from the paper, and a bold "The comparison is not like-for-like" paragraph if th
 ## 2. Setup              <- side-by-side settings table; command; ### Metric definitions (assumed if the paper is silent)
 ## 3. <Run> vs. <Paper>  <- table (paper row labeled with its data); alternative-definition table; per-fold paper metrics; Interpretation
 ## 4. <Variant A> vs. <Variant B>
-   ### Test performance  <- every metric: A | B | paired difference | folds better | p; per-fold AUC row table
+   ### Test performance  <- every metric incl. F1 (pos.) and F1 (macro): A | B | paired difference | folds better | p;
+                            per-fold AUC row table
    ### Agreement of predictions   <- agreement %, prob correlation, 2×2 flip table
-   ### Pooled confusion matrices / ### Sensitivity by subtype / ### Training behavior and time
+   ### Pooled confusion matrices / ### Per-class performance (precision, recall, F1 per class and run)
+   ### Performance by subtype / ### Training behavior and time
    **Interpretation.**
 ## 5. <A> vs. <B> vs. <Paper>   <- one table + gaps + "gap closed by <variable>" (paired improvement / gap)
    ### What could explain the remaining gap   <- ordered from most to least likely, each marked unchecked; a concrete next step
@@ -132,16 +145,20 @@ Model: `results/encoder_comparison_B32_report.md`.
 **Runs compared:** table Name | Experiment code | Run date | Report path. State that these are our own runs
 and why the shared setting was chosen.
 
-## 1. Summary                  <- compact metric table + 4–5 bold-lead conclusion bullets
+## 1. Summary                  <- compact metric table (incl. F1) + 4–5 bold-lead conclusion bullets
 ## 2. Setup                    <- ### What is the same in all runs (table), ### What differs (table), ### Metrics (definitions + the paired-test note)
-## 3. Overall Test Performance <- every metric; bold the best mean; last column "Significant differences (p < 0.05)"
-## 4. Per-Fold Test Results    <- per-fold AUC table with a "best in fold" column; sens/spec per fold
-## 5. Paired Statistical Comparison  <- one cell per pair: diff ± SD, wins, p; multiple-comparison note (see SKILL.md)
-## 6. Error Analysis           <- pooled confusion matrices, sensitivity by subtype (pooled + per fold), agreement / overlap of errors between runs
-## 7. Training Dynamics and Model Selection  <- best epoch, epochs run, loss first/best/last, train loss last, val AUC, val-test r
-## 8. Computational Cost       <- feature dim, storage, parameters of the first layer, time per epoch, total time
-## 9. Context: <published reference>   <- short; say what is and is not comparable
-## 10. Conclusions             <- numbered conclusions; ### Limitations; ### Possible next steps
+## 3. Overall Test Performance <- every metric incl. F1 (pos.) and F1 (macro); bold the best mean; last column
+                                  "Significant differences (p < 0.05)"
+## 4. Per-Fold Test Results    <- per-fold AUC table with a "best in fold" column; sens/spec/F1 per fold
+## 5. Per-Class Performance    <- one table: Class × run, cells precision / recall / F1 (pooled; F1 also mean ± SD
+                                  over folds); macro-average row; paired F1 difference per class (diff, wins, p);
+                                  bullets: weakest class per run, precision- or recall-driven
+## 6. Paired Statistical Comparison  <- one cell per pair: diff ± SD, wins, p (incl. F1); multiple-comparison note (see SKILL.md)
+## 7. Error Analysis           <- pooled confusion matrices, performance by subtype (pooled + per fold), agreement / overlap of errors between runs
+## 8. Training Dynamics and Model Selection  <- best epoch, epochs run, loss first/best/last, train loss last, val AUC, val-test r
+## 9. Computational Cost       <- feature dim, storage, parameters of the first layer, time per epoch, total time
+## 10. Context: <published reference>   <- short; say what is and is not comparable
+## 11. Conclusions             <- numbered conclusions; ### Limitations; ### Possible next steps
 ## Figures                     <- where the figures live and the command that regenerates them
 ```
 

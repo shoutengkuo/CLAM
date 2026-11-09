@@ -25,8 +25,8 @@ import sys
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import (cohen_kappa_score, confusion_matrix, f1_score, precision_score, recall_score,
-                             roc_auc_score)
+from sklearn.metrics import (cohen_kappa_score, confusion_matrix, f1_score, precision_recall_fscore_support,
+                             precision_score, recall_score, roc_auc_score)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collect_metrics import fold_logs  # noqa: E402  (same TensorBoard reader as the binary script)
@@ -88,11 +88,19 @@ def report(name, df, preds, classes):
     print('\n## Multi-class (mean ± SD over folds)')
     for m in ['auc', 'acc', 'bacc', 'f1_macro', 'f1_weighted', 'kappa', 'kappa_qw', 'val_auc']:
         print(f'{m:12s} {ms(df[m])}   (min {df[m].min():.4f}, max {df[m].max():.4f})')
-    print('\n## Per class (mean ± SD over folds)')
-    print('| Class | n per test fold | AUC (OvR) | Recall | Precision | F1 |\n|---|---|---|---|---|---|')
-    for c in classes:
-        print(f'| {c} | {df[f"cls_n_{c}"].min()}–{df[f"cls_n_{c}"].max()} | {ms(df[f"cls_auc_{c}"])} | {ms(df[f"cls_recall_{c}"])} | '
-              f'{ms(df[f"cls_prec_{c}"])} | {ms(df[f"cls_f1_{c}"])} |')
+    print('\n## Per-class performance (per fold: mean ± SD over folds; pooled: all test predictions)')
+    print('| Class | n per test fold | Support (pooled) | AUC (OvR) | Precision | Recall | F1 | Pooled precision | Pooled recall | Pooled F1 |')
+    print('|---|---|---|---|---|---|---|---|---|---|')
+    C = len(classes)
+    pp, rr, ff, nn = precision_recall_fscore_support(preds.y, preds.pred, labels=range(C), zero_division=0)
+    for i, c in enumerate(classes):
+        print(f'| {c} | {df[f"cls_n_{c}"].min()}–{df[f"cls_n_{c}"].max()} | {nn[i]} | {ms(df[f"cls_auc_{c}"])} | '
+              f'{ms(df[f"cls_prec_{c}"])} | {ms(df[f"cls_recall_{c}"])} | {ms(df[f"cls_f1_{c}"])} | {pp[i]:.4f} | {rr[i]:.4f} | {ff[i]:.4f} |')
+    for avg in ('macro', 'weighted'):
+        P, R, F, _ = precision_recall_fscore_support(preds.y, preds.pred, labels=range(C), average=avg, zero_division=0)
+        mean_prec = df[[f'cls_prec_{c}' for c in classes]].mean(1) if avg == 'macro' else None
+        cells = (f'{ms(mean_prec)} | {ms(df.bacc)} | {ms(df.f1_macro)}' if avg == 'macro' else f' | | {ms(df.f1_weighted)}')
+        print(f'| {avg.capitalize()} avg | | {len(preds)} | | {cells} | {P:.4f} | {R:.4f} | {F:.4f} |')
     cm = confusion_matrix(preds.y, preds.pred, labels=range(len(classes)))
     print('\n## Pooled confusion matrix (rows = true, columns = predicted)')
     print('| | ' + ' | '.join(classes) + ' |\n|---|' + '---|' * len(classes))

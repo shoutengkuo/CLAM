@@ -66,17 +66,28 @@ Run it inside the clam environment:
 ```bash
 /var/tmp/shouteng_conda/envs/clam/bin/python .claude/skills/clam-experiment-report/scripts/collect_metrics.py \
     results/<run_A> results/<run_B> --names A B \
-    --subtypes "/mnt/nas/Camelyon+/slide-lables/Camelyon+(4-classes).xlsx" --csv-dir <scratchpad>/metrics
+    --subtypes "/mnt/nas/Camelyon+/slide-lables/Camelyon+(4-classes).xlsx" \
+    --class-names normal tumor \
+    --csv-dir <scratchpad>/metrics
 ```
 
 It prints markdown tables for:
-- the summary, per-fold results and paper-style metrics (AUC / bACC / macro F1 / macro mAP);
-- test-set composition, the pooled confusion matrix and detection rate by subtype;
+- the summary, per-fold results and paper-style metrics (AUC / bACC / macro F1 / macro mAP), each
+  with F1 (positive class and macro);
+- test-set composition and the pooled confusion matrix;
+- **per-class performance**: precision, recall, F1 and support for each class, per fold (mean ± SD)
+  and pooled, plus macro and weighted averages;
+- **performance by subtype**: n, correct, recall (pooled and per fold), mean P(class 1), and the AUC of
+  that subtype against all slides of the other class;
 - training time, training dynamics, and the correlation between validation and test AUC;
-- with two or more runs, paired differences with Wilcoxon p-values and prediction agreement.
+- with two or more runs, paired differences with Wilcoxon p-values (including F1 of each class and
+  NPV), per-class F1 side by side, and prediction agreement.
 
-Leave out `--subtypes` for datasets that have no subtype labels. `--csv-dir` writes per-fold and
-per-slide CSVs for any extra analysis.
+`--class-names` names class 0 and class 1 in the tables (e.g. `normal tumor`, `Control disease`).
+`--subtypes` takes an xlsx or csv mapping slides to subtypes. It uses the columns `slide_id` and
+`label` when they exist (e.g. `dataset_csv/ienf_isfn_4sub.csv`), otherwise the first two columns.
+Leave it out for datasets without subtype labels. `--csv-dir` writes per-fold and per-slide CSVs
+for any extra analysis.
 
 The script asserts that recomputed test AUC and accuracy match `summary.csv`. If that fails, stop and
 find out why before writing anything.
@@ -85,7 +96,8 @@ For **multi-class tasks** (e.g. `camelyon_plus_4cls`), use `scripts/collect_metr
 <runs> --names ... --classes negative itc micro macro --csv-dir <dir>` instead. It reports:
 - macro one-vs-rest AUC (checked against `summary.csv`), balanced accuracy, macro and weighted F1,
   Cohen's kappa (plain and quadratic-weighted for ordered classes);
-- per-class AUC, recall, precision and F1, and the pooled confusion matrix;
+- per-class AUC, precision, recall, F1 and support (per fold and pooled, with macro and weighted
+  averages), and the pooled confusion matrix;
 - a **binary collapse** (class 0 vs. the rest), so a multi-class run can be compared fold by fold with
   a binary run on the same splits. When the binary operating points differ, also compare sensitivity
   at matched specificity. A shifted threshold can look like a sensitivity gain.
@@ -131,6 +143,13 @@ Reports are written in **English**, in plain, direct sentences. Talk to the user
 - The positive class is the tumor / positive class (label 1).
 - Threshold-based metrics use argmax, which is a 0.5 threshold for two classes.
 - Report mean ± SD over folds, with sample SD (ddof = 1) and 4 decimals.
+- **F1 appears in every table of evaluation metrics** (summary, per-fold, comparison and paired
+  tables): the positive-class F1, and also macro F1 whenever classes are compared or the classes are
+  imbalanced. State which F1 a column is.
+- Every report has a **per-class performance** section (see the templates): precision, recall and F1
+  for each class. In a binary task, recall of class 1 = sensitivity, recall of class 0 =
+  specificity, precision of class 1 = PPV and precision of class 0 = NPV; say this once so readers
+  can match the numbers to the other tables.
 - bACC = (sensitivity + specificity) / 2. F1 and mAP in paper comparisons are macro-averaged unless
   the paper says otherwise. Also list the alternative definitions (positive-class F1, weighted F1,
   positive-class AP) so a reader can match whichever definition the paper used.
@@ -148,7 +167,7 @@ Reports are written in **English**, in plain, direct sentences. Talk to the user
 - When runs share splits, use paired per-fold comparisons: the mean difference ± SD, how many folds
   the first run wins (with ties), and the two-sided exact Wilcoxon signed-rank p-value.
 - With 10 folds the smallest possible p is 1/512 ≈ 0.002, which happens when one run wins all 10
-  folds. This value passes Bonferroni over up to about 25 tests; p ≈ 0.006–0.008 does not. Do not
+  folds (with k folds it is 2/2^k; 0.0625 for 5 folds, so no 5-fold comparison can reach p < 0.05). This value passes Bonferroni over up to about 25 tests; p ≈ 0.006–0.008 does not. Do not
   claim robustness to multiple-comparison correction without checking.
 - Call a difference "significant" only if p < 0.05. Otherwise call it a trend, and give the win count.
 - Note the single-seed limitation: fold variance is captured, but seed variance is not.
@@ -159,6 +178,8 @@ earlier crashed attempt. Mention it, and exclude it from the times.
 
 **Things worth looking for in the observations section** (from past runs, as examples):
 - Where sensitivity is lost, broken down by subtype (ITC / micro / macro).
+- Which class is weaker on F1, and whether that comes from precision or from recall (e.g. a class
+  with high recall but low precision absorbs errors from the other class).
 - Whether validation AUC predicts test AUC (it usually does not, because validation sets are small).
 - Whether early stopping fires at the minimum epoch, which shows how fast the model converges or
   overfits.
